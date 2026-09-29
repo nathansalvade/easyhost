@@ -4,6 +4,7 @@ import { getPrismaClient } from './db/client';
 import { DockerService } from './docker/docker.service';
 import type { DockerodeClient } from './docker/docker.types';
 import { AppService } from './apps/app.service';
+import { AuthService } from './auth/auth.service';
 import { createServer } from './http/server';
 
 /** Loopback ranges: 127.0.0.0/8 (IPv4) and ::1 (IPv6). */
@@ -36,12 +37,17 @@ function main(): void {
   const prisma = getPrismaClient();
   const appService = new AppService(prisma, dockerService);
 
-  const app = createServer({ appService, dockerService });
+  const authService = new AuthService(prisma);
+  const app = createServer({
+    appService,
+    dockerService,
+    authService,
+    secureCookies: config.trustProxy,
+    trustProxy: config.trustProxy,
+  });
 
-  // The server only ever binds to localhost: this step ships with no
-  // authentication, so it must not be reachable from outside the host.
-  app.listen(config.port, '127.0.0.1', () => {
-    console.log(`EasyHost backend listening on http://127.0.0.1:${config.port}`);
+  app.listen(config.port, config.host, () => {
+    console.log(`EasyHost is running at http://${config.host === '0.0.0.0' ? '<server-IP>' : config.host}:${config.port}`);
   });
 }
 
