@@ -6,6 +6,7 @@ import { LoginPage, safeNext } from './pages/LoginPage';
 import { RecoverPage } from './pages/RecoverPage';
 import { HomePage } from './pages/HomePage';
 import { SettingsPage } from './pages/SettingsPage';
+import { Layout } from './components/Layout';
 
 export function App() {
   const { status, newRecoveryCode, setNewRecoveryCode } = useAuth();
@@ -51,8 +52,10 @@ export function App() {
         path="/login"
         element={<Navigate to={safeNext(new URLSearchParams(location.search).get('next'))} replace />}
       />
-      <Route path="/" element={<HomePage />} />
-      <Route path="/settings" element={<SettingsPage />} />
+      <Route element={<Layout />}>
+        <Route path="/" element={<HomePage />} />
+        <Route path="/settings" element={<SettingsPage />} />
+      </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );

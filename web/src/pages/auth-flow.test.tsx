@@ -25,8 +25,9 @@ describe('first run', () => {
     expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
     const cont = screen.getByRole('button', { name: /continue/i });
     expect(cont).toBeEnabled();
+    api.handlers.push({ method: 'GET', path: '/api/apps', body: [] }, { method: 'GET', path: '/api/catalog', body: [] });
     await user.click(cont);
-    expect(await screen.findByRole('heading', { name: /home/i })).toBeInTheDocument();
+    expect(await screen.findByText(/you don't have any apps yet/i)).toBeInTheDocument();
   });
 
   it('checks the passwords match and are long enough before sending', async () => {
