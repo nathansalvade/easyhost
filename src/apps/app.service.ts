@@ -1,7 +1,29 @@
 import { Prisma, PrismaClient, App } from '@prisma/client';
-import { AppError, ConflictError, ContainerMissingError, NotFoundError } from '../errors';
+import {
+  AppError,
+  ConflictError,
+  ContainerMissingError,
+  DockerUnavailableError,
+  NotFoundError,
+  PortInUseError,
+} from '../errors';
 import type { IDockerService } from '../docker/docker.service';
 import type { AppStatus, CreateAppInput, LogsInput } from './app.types';
+
+/** The only texts ever stored in `lastError`: raw Docker/Prisma text never reaches the UI. */
+export const INSTALL_MESSAGES = {
+  dockerDown: "Docker isn't running on the server, so the app couldn't be installed.",
+  download: "Couldn't download the app. Check that the server is connected to the internet.",
+  start: 'The app was downloaded but could not start.',
+  interrupted: 'Installation was interrupted.',
+  portInUse: (port: number) => `Port ${port} is already used by another program on the server.`,
+};
+
+function installMessage(err: unknown, stage: 'pull' | 'start'): string {
+  if (err instanceof DockerUnavailableError) return INSTALL_MESSAGES.dockerDown;
+  if (err instanceof PortInUseError) return INSTALL_MESSAGES.portInUse(Number(err.details?.port));
+  return stage === 'pull' ? INSTALL_MESSAGES.download : INSTALL_MESSAGES.start;
+}
 
 const RECONCILABLE_STATUSES = new Set<AppStatus>(['RUNNING', 'STOPPED']);
 
@@ -50,6 +72,9 @@ export class AppService implements IAppService {
     private readonly docker: IDockerService,
   ) {}
 
+  private readonly inflight = new Set<Promise<void>>();
+
+  /** Resolves with the PENDING row at once; the install continues in the background. */
   async create(input: CreateAppInput): Promise<App> {
     await this.checkConflict(input.name, input.hostPort);
 
@@ -62,6 +87,10 @@ export class AppService implements IAppService {
           hostPort: input.hostPort,
           containerPort: input.containerPort,
           status: 'PENDING',
+          catalogId: input.catalogId ?? null,
+          volumes: JSON.stringify(input.volumes ?? []),
+          fixedPorts: JSON.stringify(input.fixedPorts ?? []),
+          secrets: JSON.stringify(input.secrets ?? {}),
         },
       });
     } catch (err) {
@@ -71,31 +100,68 @@ export class AppService implements IAppService {
       throw err;
     }
 
+    const job = this.install(app.id, input).finally(() => this.inflight.delete(job));
+    this.inflight.add(job);
+    return app;
+  }
+
+  /** Resolves when every background install has finished (tests, shutdown). */
+  async settled(): Promise<void> {
+    await Promise.allSettled([...this.inflight]);
+  }
+
+  /** Installs cut short by a restart are left PENDING forever otherwise. Call once at startup. */
+  async recoverInterruptedInstalls(): Promise<number> {
+    const { count } = await this.prisma.app.updateMany({
+      where: { status: 'PENDING' },
+      data: { status: 'ERROR', lastError: INSTALL_MESSAGES.interrupted },
+    });
+    return count;
+  }
+
+  /** Never throws: every outcome is written to the row. */
+  private async install(id: string, input: CreateAppInput): Promise<void> {
+    let stage: 'pull' | 'start' = 'pull';
     let containerId: string | undefined;
     try {
       await this.docker.pullImage(input.image);
+      stage = 'start';
       containerId = await this.docker.createAndStart({
         name: input.name,
         image: input.image,
         hostPort: input.hostPort,
         containerPort: input.containerPort,
         env: input.env,
+        fixedPorts: input.fixedPorts,
+        mounts: await this.mountsFor(id, input),
       });
-      return await this.prisma.app.update({
-        where: { id: app.id },
-        data: { containerId, status: 'RUNNING' },
-      });
+      await this.prisma.app.update({ where: { id }, data: { containerId, status: 'RUNNING', lastError: null } });
     } catch (err) {
+      if (isRecordNotFoundError(err) && containerId) {
+        // The app was removed while installing: do not leave its container behind.
+        await this.docker.remove(containerId, { force: true }).catch((e) => console.error(e));
+        return;
+      }
+      console.error(err);
       // If the container was created but start and the best-effort cleanup
       // both failed, DockerService carries the orphaned container's id on
       // the error so the row (and the container) can still be recovered.
       const idFromError = err instanceof AppError ? err.containerId : undefined;
-      await this.prisma.app.update({
-        where: { id: app.id },
-        data: { containerId: containerId ?? idFromError ?? null, status: 'ERROR' },
-      });
-      throw err;
+      await this.prisma.app
+        .update({
+          where: { id },
+          data: { status: 'ERROR', containerId: containerId ?? idFromError ?? null, lastError: installMessage(err, stage) },
+        })
+        .catch((e) => console.error(e));
     }
+  }
+
+  /** Task 13 replaces this with real data folders. */
+  protected async mountsFor(
+    _id: string,
+    _input: CreateAppInput,
+  ): Promise<Array<{ hostPath: string; containerPath: string }>> {
+    return [];
   }
 
   async start(id: string): Promise<App> {
@@ -109,7 +175,7 @@ export class AppService implements IAppService {
       await this.markErrorOnContainerMissing(id, err);
       throw err;
     }
-    return this.prisma.app.update({ where: { id }, data: { status: 'RUNNING' } });
+    return this.prisma.app.update({ where: { id }, data: { status: 'RUNNING', lastError: null } });
   }
 
   async stop(id: string): Promise<App> {
@@ -123,7 +189,7 @@ export class AppService implements IAppService {
       await this.markErrorOnContainerMissing(id, err);
       throw err;
     }
-    return this.prisma.app.update({ where: { id }, data: { status: 'STOPPED' } });
+    return this.prisma.app.update({ where: { id }, data: { status: 'STOPPED', lastError: null } });
   }
 
   async remove(id: string): Promise<void> {
