@@ -35,6 +35,7 @@ manages it from a laptop or phone on the same home network.
 |---|---|
 | Access | From the home network, protected by a login |
 | Choosing what to install | Catalog of ready-made apps, plus an Advanced custom-image form |
+| App guidance | Every catalog app has a description and a step-by-step guide, split by operating system where steps differ |
 | App data | Saved automatically per app; kept on removal unless the user opts in to delete it |
 | Opening apps | Each app at `http://<server-IP>:<port>`; the UI shows the address with Open / Copy |
 | Accounts | A single administrator account |
@@ -163,22 +164,92 @@ Each `catalog/<id>.json`:
 
 - Validated with Zod at startup; an invalid entry prevents startup and fails CI.
 - Image tags are pinned to a specific version; `:latest` is rejected.
-- Categories: Media, Files, Smart home, Monitoring.
+- Categories: Media, Files, Smart home, Network, Monitoring.
 - `GET /api/catalog` returns the entries; icons are served as static files.
 
-Initial catalog, limited to apps that work with a single port over plain
-HTTP: Jellyfin, Audiobookshelf, Nextcloud, File Browser, Home Assistant,
-Uptime Kuma. Exact image versions are chosen and checked during
+Optional fields, used by apps that need them:
+
+    "fixedPorts": [
+      { "containerPort": 53, "hostPort": 53, "protocol": "tcp" },
+      { "containerPort": 53, "hostPort": 53, "protocol": "udp" }
+    ],
+    "generatedSecrets": [
+      { "name": "adminPassword", "label": "Admin password",
+        "env": "FTLCONF_webserver_api_password" }
+    ]
+
+- `fixedPorts` are published exactly as declared (never auto-suggested) on
+  `CONTAINER_BIND_ADDRESS`. Before installing, each one is checked free on
+  the host for its protocol; if one is taken, the install is refused with
+  `PORT_IN_USE`, naming the port, and the UI points to the app's server guide.
+- `generatedSecrets` are random 20-character values created at install time,
+  passed to the container through the named env variable, stored on the
+  `App` row (`secrets`, JSON) and shown on the app page with Copy. They are
+  returned only by `GET /api/apps/:id` to an authenticated session, never in
+  list responses or logs.
+
+### Description and guide
+
+Every catalog entry has a one-line `description` (shown on cards) and a
+`guide`: short, numbered, plain-English steps for what to do after
+installing (for example: open it, create the app's own account, where to
+put files). Steps are split by operating system only where they actually
+differ:
+
+    "guide": {
+      "afterInstall": [ "...", "..." ],
+      "server": {
+        "linux": { "default": [...], "ubuntu": [...], "fedora": [...] },
+        "windows": [...],
+        "macos": [...]
+      },
+      "devices": {
+        "router": [...], "windows": [...], "macos": [...],
+        "linux": [...], "android": [...], "ios": [...]
+      }
+    }
+
+- `afterInstall` is required; `server` and `devices` are optional.
+- **Server steps** depend on the machine running EasyHost. The backend
+  detects it (`GET /api/system` → `{ os, distro }`, from the platform and
+  `/etc/os-release`), and the UI shows only the matching variant, falling
+  back to `linux.default` for unlisted distributions. Other variants stay
+  reachable behind "Show steps for another system".
+- **Device steps** depend on the device being configured. The UI preselects
+  the viewer's system from the browser and offers tabs for the others;
+  `router` is listed first when present, as the recommended option.
+- The guide appears on the app page and in the install dialog ("Before you
+  install", when `server` steps exist). It is never a popup or a forced tour.
+- Guide text is written during implementation and reviewed against each
+  app's current official documentation.
+
+### Initial catalog
+
+Jellyfin, Audiobookshelf, Nextcloud, File Browser, Home Assistant,
+Uptime Kuma and Pi-hole. Exact image versions are chosen and checked during
 implementation.
 
-Deliberately excluded for now: Vaultwarden (its web vault requires HTTPS),
-Pi-hole (needs port 53 and extra network privileges), and multi-container or
-multi-port apps such as Immich or Syncthing.
+Pi-hole runs as a DNS server only: its DHCP feature is not enabled, so it
+needs no extra network privileges. Its entry declares `fixedPorts` 53/tcp
+and 53/udp, a generated admin password, and a guide with:
+
+- **Server**: freeing port 53 where the system already uses it (Ubuntu and
+  Fedora run a local DNS stub that must be told to stop listening on 53;
+  Debian and Raspberry Pi OS usually need nothing; Windows and macOS with
+  Docker Desktop need nothing unless another DNS service is running).
+- **Devices**: pointing the router's DNS at the server (recommended, covers
+  every device at once), then per-device steps for Windows, macOS, Linux,
+  Android and iOS.
+
+Deliberately excluded for now: Vaultwarden (its web vault requires HTTPS)
+and multi-container apps such as Immich.
 
 ## App data
 
 - `App` gains `catalogId String?`, `volumes String` (JSON array of
-  `{ name, containerPath }`, default `[]`) and `lastError String?`.
+  `{ name, containerPath }`, default `[]`), `fixedPorts String` (JSON,
+  default `[]`), `secrets String` (JSON, default `{}`) and
+  `lastError String?`.
 - Each volume is bind-mounted from `DATA_DIR/apps/<app id>/<volume name>`.
   The app id, not the name, is used so folder names are always safe.
 - Custom-image apps have no volumes unless added in the Advanced form
@@ -232,8 +303,10 @@ three items become a bottom bar. Light/dark theme follows the system.
   Clicking a card opens the app page. With no apps, Home shows "You don't have
   any apps yet" with four catalog suggestions and an Install button. Home
   refreshes every 5 seconds while visible.
-- **App page** — status, address with Open/Copy, Start/Stop, recent logs with
-  Refresh and an auto-refresh toggle, the data folder location, and Remove.
+- **App page** — status, address with Open/Copy, generated secrets (such as
+  Pi-hole's admin password) with Copy, the app's guide, Start/Stop, recent
+  logs with Refresh and an auto-refresh toggle, the data folder location,
+  and Remove.
   Remove explains that data is kept, with an unchecked "Delete data too" box.
   An app in Problem shows its `lastError` and the actions available.
 - **Add** — search and category filters over the catalog. Install opens a
@@ -296,7 +369,13 @@ Backend (Jest; no Docker daemon, no external network):
 - **Background install**: `202`, then `RUNNING`, or `ERROR` with `lastError`;
   stale `PENDING` rows become `ERROR` on startup.
 - **Catalog**: every entry passes the schema, its icon exists, its image tag
-  is pinned.
+  is pinned, and it has a description and a non-empty `afterInstall` guide.
+- **Fixed ports and secrets**: a taken fixed port (the test binds a real
+  local TCP and UDP port) refuses the install with `PORT_IN_USE`; generated
+  secrets reach the container env, appear in `GET /api/apps/:id` and not in
+  the list response.
+- **System detection**: `/etc/os-release` samples for Ubuntu, Debian,
+  Fedora and an unknown distribution map to the right guide variant.
 - **App data**: folders under `DATA_DIR/apps/<id>`; data kept by default and
   deleted only on request; path guard refuses anything outside
   `DATA_DIR/apps/`.
@@ -311,6 +390,8 @@ Frontend (Vitest + React Testing Library, mocked API):
 - Forgot password through to the new recovery code.
 - Install from catalog: card appears as Installing…, then Running.
 - Remove with and without "Delete data too".
+- Guide: server variant matches the reported system; device tab preselected
+  from the browser; switching tabs works.
 - Every backend error code has a message.
 
 CI adds the web typecheck, lint, test and build to the existing Node 20/22
@@ -324,6 +405,6 @@ reported rather than claimed.
 ## Out of scope for this step
 
 Multiple users and roles, HTTPS certificates managed by EasyHost, access from
-outside the home network, using existing server folders in apps, multi-port
-or multi-container apps, app updates, backups, live log streaming, and
-translations. The structure leaves room for each.
+outside the home network, using existing server folders in apps,
+multi-container apps, Pi-hole's DHCP server, app updates, backups, live log
+streaming, and translations. The structure leaves room for each.
