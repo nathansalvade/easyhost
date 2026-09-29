@@ -7,6 +7,8 @@ export interface RateLimiterOptions {
   freeAttempts?: number;
   baseDelayMs?: number;
   maxDelayMs?: number;
+  idleWindowMs?: number;
+  maxKeys?: number;
   now?: () => number;
 }
 
@@ -17,18 +19,35 @@ export class RateLimiter {
   private readonly freeAttempts: number;
   private readonly baseDelayMs: number;
   private readonly maxDelayMs: number;
+  private readonly idleWindowMs: number;
+  private readonly maxKeys: number;
   private readonly now: () => number;
 
-  constructor({ freeAttempts = 5, baseDelayMs = 30_000, maxDelayMs = 900_000, now = Date.now }: RateLimiterOptions = {}) {
+  constructor({ freeAttempts = 5, baseDelayMs = 30_000, maxDelayMs = 900_000, idleWindowMs = 86_400_000, maxKeys = 10_000, now = Date.now }: RateLimiterOptions = {}) {
     this.freeAttempts = freeAttempts;
     this.baseDelayMs = baseDelayMs;
     this.maxDelayMs = maxDelayMs;
+    this.idleWindowMs = idleWindowMs;
+    this.maxKeys = maxKeys;
     this.now = now;
+  }
+
+  private isIdle(entry: Entry): boolean {
+    return this.now() - entry.lastFailureAt > this.idleWindowMs;
+  }
+
+  private sweepStale(): void {
+    const now = this.now();
+    for (const [key, entry] of this.entries.entries()) {
+      if (now - entry.lastFailureAt > this.idleWindowMs) {
+        this.entries.delete(key);
+      }
+    }
   }
 
   check(key: string): RateLimitDecision {
     const entry = this.entries.get(key);
-    if (!entry || entry.failures < this.freeAttempts) {
+    if (!entry || entry.failures < this.freeAttempts || this.isIdle(entry)) {
       return { allowed: true };
     }
     const delay = Math.min(this.baseDelayMs * 2 ** (entry.failures - this.freeAttempts), this.maxDelayMs);
@@ -41,7 +60,27 @@ export class RateLimiter {
 
   recordFailure(key: string): void {
     const entry = this.entries.get(key);
-    this.entries.set(key, { failures: (entry?.failures ?? 0) + 1, lastFailureAt: this.now() });
+    const isNewKey = !entry || this.isIdle(entry);
+
+    // If adding a new key would exceed the cap, manage space
+    if (isNewKey && this.entries.size >= this.maxKeys) {
+      this.sweepStale();
+      // If still at cap, evict least-recently-failed entry
+      if (this.entries.size >= this.maxKeys) {
+        const firstKey = this.entries.keys().next().value as string | undefined;
+        if (firstKey) {
+          this.entries.delete(firstKey);
+        }
+      }
+    }
+
+    // Delete then re-insert to update Map's insertion order (tracks recency)
+    if (entry && !this.isIdle(entry)) {
+      this.entries.delete(key);
+    }
+    // If entry was idle or doesn't exist, reset failures to 0; otherwise preserve and increment
+    const newFailures = isNewKey ? 1 : (entry?.failures ?? 0) + 1;
+    this.entries.set(key, { failures: newFailures, lastFailureAt: this.now() });
   }
 
   reset(key: string): void {
