@@ -2,9 +2,11 @@ import {
   RECOVERY_ALPHABET,
   generateRecoveryCode,
   generateSessionToken,
+  hashRecoveryCode,
   hashSecret,
   hashToken,
   normalizeRecoveryCode,
+  verifyRecoveryCode,
   verifySecret,
 } from './crypto';
 
@@ -47,6 +49,21 @@ describe('recovery codes', () => {
     [' k7qx2 abcde fghjk mnpqr ', 'K7QX2ABCDEFGHJKMNPQR'],
   ])('normalizes %p', (input, expected) => {
     expect(normalizeRecoveryCode(input)).toBe(expected);
+  });
+});
+
+describe('recovery code hashes', () => {
+  it('uses a fast SHA-256 hash and verifies only the right code', async () => {
+    const stored = hashRecoveryCode('AAAAABBBBBCCCCCDDDDD');
+    expect(stored).toMatch(/^sha256\$[0-9a-f]{64}$/);
+    await expect(verifyRecoveryCode('AAAAABBBBBCCCCCDDDDD', stored)).resolves.toBe(true);
+    await expect(verifyRecoveryCode('AAAAABBBBBCCCCCDDDDE', stored)).resolves.toBe(false);
+  });
+
+  it('still accepts a code stored with scrypt by an earlier build', async () => {
+    const legacy = await hashSecret('AAAAABBBBBCCCCCDDDDD');
+    await expect(verifyRecoveryCode('AAAAABBBBBCCCCCDDDDD', legacy)).resolves.toBe(true);
+    await expect(verifyRecoveryCode('AAAAABBBBBCCCCCDDDDE', legacy)).resolves.toBe(false);
   });
 });
 

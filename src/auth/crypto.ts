@@ -33,6 +33,28 @@ export async function verifySecret(secret: string, stored: string): Promise<bool
   return expected.length === actual.length && timingSafeEqual(expected, actual);
 }
 
+const RECOVERY_HASH_PREFIX = 'sha256$';
+
+/**
+ * The recovery code is ~99 random bits, so a fast hash is enough: it cannot
+ * be guessed either way, and checking it must stay cheap so a flood of
+ * recovery attempts cannot tie up the CPU (scrypt costs ~16 MB and up to
+ * 300 ms per attempt on a Raspberry Pi). Expects the normalized code.
+ */
+export function hashRecoveryCode(normalizedCode: string): string {
+  return RECOVERY_HASH_PREFIX + createHash('sha256').update(normalizedCode).digest('hex');
+}
+
+export async function verifyRecoveryCode(normalizedCode: string, stored: string): Promise<boolean> {
+  if (!stored.startsWith(RECOVERY_HASH_PREFIX)) {
+    // Stored by an earlier build with scrypt; replaced by the next new code.
+    return verifySecret(normalizedCode, stored);
+  }
+  const expected = Buffer.from(stored.slice(RECOVERY_HASH_PREFIX.length), 'hex');
+  const actual = createHash('sha256').update(normalizedCode).digest();
+  return expected.length === actual.length && timingSafeEqual(expected, actual);
+}
+
 export function generateRecoveryCode(): string {
   const chars = Array.from({ length: 20 }, () => RECOVERY_ALPHABET[randomInt(RECOVERY_ALPHABET.length)]);
   return [0, 5, 10, 15].map((i) => chars.slice(i, i + 5).join('')).join('-');

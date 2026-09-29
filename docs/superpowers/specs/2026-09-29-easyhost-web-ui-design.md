@@ -104,7 +104,10 @@ manages it from a laptop or phone on the same home network.
 - Minimum password length: 10 characters.
 - The recovery code is 20 random characters from an unambiguous alphabet
   (no `0/O`, `1/I/L`), shown as four groups of five (`K7QX2-...`), about
-  100 bits of entropy. It is stored only as a `scrypt` hash.
+  100 bits of entropy. It is stored only as a SHA-256 hash: it cannot be
+  guessed, so a slow hash adds nothing, and a cheap check keeps a flood of
+  recovery attempts from tying up the CPU. Recovery attempts are not queued
+  behind logins.
 - Session tokens are 32 random bytes, sent as an `HttpOnly`, `SameSite=Strict`
   cookie (`Secure` when `TRUST_PROXY` is set) scoped to `Path=/api`, so apps
   published on other ports of the same host do not receive it on their pages.
