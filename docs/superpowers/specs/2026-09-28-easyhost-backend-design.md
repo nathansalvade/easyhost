@@ -84,6 +84,9 @@ Owns every invariant that spans the database and the daemon:
   already gone still removes the row.
 - List and get reconcile the stored status against `inspectState`, so a container
   stopped outside EasyHost is not reported as running.
+- A container deleted outside EasyHost is never reported as merely stopped: reconciling,
+  starting, stopping, or reading logs for it sets `status = ERROR` and surfaces
+  `ContainerMissingError`.
 
 ## Data model
 
@@ -130,6 +133,7 @@ sane maximum. Request bodies are validated with Zod at the router.
 | `ConflictError` | 409 | `NAME_TAKEN` / `PORT_TAKEN` |
 | `DockerUnavailableError` | 503 | `DOCKER_UNAVAILABLE` |
 | `DockerOperationError` | 502 | `DOCKER_OPERATION_FAILED` |
+| `ContainerMissingError` | 409 | `CONTAINER_MISSING` |
 
 The error middleware is the only place that formats an error response:
 `{ error: { code, message } }`. Raw dockerode errors never reach a client;

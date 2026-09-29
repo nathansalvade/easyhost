@@ -1,6 +1,6 @@
 import request from 'supertest';
 import { createServer } from './server';
-import { ConflictError, DockerUnavailableError, NotFoundError } from '../errors';
+import { ConflictError, ContainerMissingError, DockerUnavailableError, NotFoundError } from '../errors';
 import type { IAppService } from '../apps/app.service';
 import type { IDockerService } from '../docker/docker.service';
 
@@ -280,6 +280,19 @@ describe('createServer', () => {
 
       expect(res.status).toBe(503);
       expect(res.body.error.code).toBe('DOCKER_UNAVAILABLE');
+    });
+
+    it('maps ContainerMissingError to 409 when the container was deleted outside EasyHost', async () => {
+      const appService = makeAppServiceMock();
+      appService.start.mockRejectedValue(new ContainerMissingError());
+      const app = createServer({ appService, dockerService: makeDockerServiceMock() });
+
+      const res = await request(app).post('/api/apps/app-1/start');
+
+      expect(res.status).toBe(409);
+      expect(res.body).toEqual({
+        error: { code: 'CONTAINER_MISSING', message: expect.any(String) },
+      });
     });
   });
 

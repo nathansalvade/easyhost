@@ -1,4 +1,4 @@
-import { DockerOperationError, DockerUnavailableError } from '../errors';
+import { ContainerMissingError, DockerOperationError, DockerUnavailableError } from '../errors';
 import type { DaemonError, DockerodeClient } from './docker.types';
 
 const CONNECTION_ERROR_CODES = new Set(['ENOENT', 'EACCES', 'ECONNREFUSED']);
@@ -16,6 +16,7 @@ export interface LogsOptions {
 }
 
 export interface ContainerState {
+  exists: boolean;
   running: boolean;
 }
 
@@ -149,6 +150,9 @@ export class DockerService implements IDockerService {
       if (isDaemonError(err) && err.statusCode === 304) {
         return;
       }
+      if (isDaemonError(err) && err.statusCode === 404) {
+        throw new ContainerMissingError();
+      }
       throw this.translateError(err);
     }
   }
@@ -159,6 +163,9 @@ export class DockerService implements IDockerService {
     } catch (err) {
       if (isDaemonError(err) && err.statusCode === 304) {
         return;
+      }
+      if (isDaemonError(err) && err.statusCode === 404) {
+        throw new ContainerMissingError();
       }
       throw this.translateError(err);
     }
@@ -187,6 +194,9 @@ export class DockerService implements IDockerService {
       });
       return demuxLogs(buffer);
     } catch (err) {
+      if (isDaemonError(err) && err.statusCode === 404) {
+        throw new ContainerMissingError();
+      }
       throw this.translateError(err);
     }
   }
@@ -194,10 +204,10 @@ export class DockerService implements IDockerService {
   async inspectState(containerId: string): Promise<ContainerState> {
     try {
       const info = await this.docker.getContainer(containerId).inspect();
-      return { running: info.State.Running };
+      return { exists: true, running: info.State.Running };
     } catch (err) {
       if (isDaemonError(err) && err.statusCode === 404) {
-        return { running: false };
+        return { exists: false, running: false };
       }
       throw this.translateError(err);
     }

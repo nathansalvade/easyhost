@@ -1,5 +1,5 @@
 import { DockerService } from './docker.service';
-import { DockerOperationError, DockerUnavailableError } from '../errors';
+import { ContainerMissingError, DockerOperationError, DockerUnavailableError } from '../errors';
 import type { DaemonError, DockerodeClient, DockerodeContainer } from './docker.types';
 
 function makeContainer(overrides: Partial<DockerodeContainer> = {}): DockerodeContainer {
@@ -192,6 +192,16 @@ describe('DockerService', () => {
 
       await expect(service.start('abc123')).resolves.toBeUndefined();
     });
+
+    it('rejects with ContainerMissingError when the container no longer exists (404)', async () => {
+      const container = makeContainer({
+        start: jest.fn().mockRejectedValue(daemonError('no such container', { statusCode: 404 })),
+      });
+      const docker = makeDocker({ getContainer: jest.fn().mockReturnValue(container) });
+      const service = new DockerService(docker);
+
+      await expect(service.start('abc123')).rejects.toBeInstanceOf(ContainerMissingError);
+    });
   });
 
   describe('stop', () => {
@@ -213,6 +223,16 @@ describe('DockerService', () => {
       const service = new DockerService(docker);
 
       await expect(service.stop('abc123')).resolves.toBeUndefined();
+    });
+
+    it('rejects with ContainerMissingError when the container no longer exists (404)', async () => {
+      const container = makeContainer({
+        stop: jest.fn().mockRejectedValue(daemonError('no such container', { statusCode: 404 })),
+      });
+      const docker = makeDocker({ getContainer: jest.fn().mockReturnValue(container) });
+      const service = new DockerService(docker);
+
+      await expect(service.stop('abc123')).rejects.toBeInstanceOf(ContainerMissingError);
     });
   });
 
@@ -282,33 +302,45 @@ describe('DockerService', () => {
 
       expect(container.logs).toHaveBeenCalledWith(expect.objectContaining({ tail: 50 }));
     });
+
+    it('rejects with ContainerMissingError when the container no longer exists (404)', async () => {
+      const container = makeContainer({
+        logs: jest.fn().mockRejectedValue(daemonError('no such container', { statusCode: 404 })),
+      });
+      const docker = makeDocker({ getContainer: jest.fn().mockReturnValue(container) });
+      const service = new DockerService(docker);
+
+      await expect(service.logs('abc123', { tail: 100 })).rejects.toBeInstanceOf(
+        ContainerMissingError,
+      );
+    });
   });
 
   describe('inspectState', () => {
-    it('returns running: true for a running container', async () => {
+    it('returns exists: true, running: true for a running container', async () => {
       const container = makeContainer({ inspect: jest.fn().mockResolvedValue({ State: { Running: true } }) });
       const docker = makeDocker({ getContainer: jest.fn().mockReturnValue(container) });
       const service = new DockerService(docker);
 
-      await expect(service.inspectState('abc123')).resolves.toEqual({ running: true });
+      await expect(service.inspectState('abc123')).resolves.toEqual({ exists: true, running: true });
     });
 
-    it('returns running: false for a stopped container', async () => {
+    it('returns exists: true, running: false for a stopped container', async () => {
       const container = makeContainer({ inspect: jest.fn().mockResolvedValue({ State: { Running: false } }) });
       const docker = makeDocker({ getContainer: jest.fn().mockReturnValue(container) });
       const service = new DockerService(docker);
 
-      await expect(service.inspectState('abc123')).resolves.toEqual({ running: false });
+      await expect(service.inspectState('abc123')).resolves.toEqual({ exists: true, running: false });
     });
 
-    it('returns running: false when the container no longer exists (404)', async () => {
+    it('returns exists: false, running: false when the container no longer exists (404)', async () => {
       const container = makeContainer({
         inspect: jest.fn().mockRejectedValue(daemonError('no such container', { statusCode: 404 })),
       });
       const docker = makeDocker({ getContainer: jest.fn().mockReturnValue(container) });
       const service = new DockerService(docker);
 
-      await expect(service.inspectState('abc123')).resolves.toEqual({ running: false });
+      await expect(service.inspectState('abc123')).resolves.toEqual({ exists: false, running: false });
     });
   });
 

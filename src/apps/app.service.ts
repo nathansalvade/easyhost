@@ -1,5 +1,5 @@
 import { Prisma, PrismaClient, App } from '@prisma/client';
-import { ConflictError, NotFoundError } from '../errors';
+import { ConflictError, ContainerMissingError, NotFoundError } from '../errors';
 import type { IDockerService } from '../docker/docker.service';
 import type { AppStatus, CreateAppInput, LogsInput } from './app.types';
 
@@ -93,7 +93,12 @@ export class AppService implements IAppService {
     if (!app.containerId) {
       throw new NotFoundError(`App ${id} has no associated container`);
     }
-    await this.docker.start(app.containerId);
+    try {
+      await this.docker.start(app.containerId);
+    } catch (err) {
+      await this.markErrorOnContainerMissing(id, err);
+      throw err;
+    }
     return this.prisma.app.update({ where: { id }, data: { status: 'RUNNING' } });
   }
 
@@ -102,7 +107,12 @@ export class AppService implements IAppService {
     if (!app.containerId) {
       throw new NotFoundError(`App ${id} has no associated container`);
     }
-    await this.docker.stop(app.containerId);
+    try {
+      await this.docker.stop(app.containerId);
+    } catch (err) {
+      await this.markErrorOnContainerMissing(id, err);
+      throw err;
+    }
     return this.prisma.app.update({ where: { id }, data: { status: 'STOPPED' } });
   }
 
@@ -119,7 +129,12 @@ export class AppService implements IAppService {
     if (!app.containerId) {
       throw new NotFoundError(`App ${id} has no associated container`);
     }
-    return this.docker.logs(app.containerId, options);
+    try {
+      return await this.docker.logs(app.containerId, options);
+    } catch (err) {
+      await this.markErrorOnContainerMissing(id, err);
+      throw err;
+    }
   }
 
   async list(): Promise<App[]> {
@@ -158,10 +173,31 @@ export class AppService implements IAppService {
       return app;
     }
     const state = await this.docker.inspectState(app.containerId);
+    if (!state.exists) {
+      return this.prisma.app.update({ where: { id: app.id }, data: { status: 'ERROR' } });
+    }
     const expectedStatus: AppStatus = state.running ? 'RUNNING' : 'STOPPED';
     if (app.status === expectedStatus) {
       return app;
     }
     return this.prisma.app.update({ where: { id: app.id }, data: { status: expectedStatus } });
+  }
+
+  /**
+   * If the container was deleted outside EasyHost, `docker.start/stop/logs`
+   * throw `ContainerMissingError`. The app can no longer be reconciled, so it
+   * is marked `ERROR` here; the caller is expected to rethrow the error.
+   * Persisting the status is best-effort: if it fails (e.g. the row was
+   * deleted concurrently), the failure is logged and swallowed so the
+   * original `ContainerMissingError` is always rethrown by the caller.
+   */
+  private async markErrorOnContainerMissing(id: string, err: unknown): Promise<void> {
+    if (err instanceof ContainerMissingError) {
+      try {
+        await this.prisma.app.update({ where: { id }, data: { status: 'ERROR' } });
+      } catch (updateErr) {
+        console.error(updateErr);
+      }
+    }
   }
 }

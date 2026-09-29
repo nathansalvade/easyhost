@@ -4,7 +4,8 @@ export type ErrorCode =
   | 'NAME_TAKEN'
   | 'PORT_TAKEN'
   | 'DOCKER_UNAVAILABLE'
-  | 'DOCKER_OPERATION_FAILED';
+  | 'DOCKER_OPERATION_FAILED'
+  | 'CONTAINER_MISSING';
 
 export class AppError extends Error {
   public readonly status: number;
@@ -46,5 +47,13 @@ export class DockerUnavailableError extends AppError {
 export class DockerOperationError extends AppError {
   constructor(message = 'Docker operation failed') {
     super(message, 502, 'DOCKER_OPERATION_FAILED');
+  }
+}
+
+export class ContainerMissingError extends AppError {
+  constructor(
+    message = 'The container for this app no longer exists; remove the app and create it again',
+  ) {
+    super(message, 409, 'CONTAINER_MISSING');
   }
 }
