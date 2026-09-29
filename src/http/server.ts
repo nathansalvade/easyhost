@@ -8,12 +8,16 @@ import { errorMiddleware } from './error.middleware';
 import { RateLimiter } from '../auth/rate-limiter';
 import type { IAppService } from '../apps/app.service';
 import type { IAuthService } from '../auth/auth.service';
+import type { IInstallPlanner } from '../apps/install-planner';
+import type { ViewContext } from '../apps/app.view';
 import type { IDockerService } from '../docker/docker.service';
 
 export interface ServerDeps {
   appService: IAppService;
   dockerService: IDockerService;
   authService: IAuthService;
+  planner: IInstallPlanner;
+  views: ViewContext;
   secureCookies?: boolean;
   trustProxy?: boolean;
   loginLimiter?: RateLimiter;
@@ -53,7 +57,7 @@ export function createServer(deps: ServerDeps): Application {
       secureCookies: deps.secureCookies ?? false,
     }),
   );
-  app.use('/api/apps', createAppsRouter(deps.appService));
+  app.use('/api/apps', createAppsRouter({ appService: deps.appService, planner: deps.planner, views: deps.views }));
 
   app.use(errorMiddleware);
 

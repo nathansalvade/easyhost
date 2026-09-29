@@ -1,3 +1,4 @@
+import * as path from 'path';
 import Docker from 'dockerode';
 import { loadConfig } from './config';
 import { getPrismaClient } from './db/client';
@@ -5,6 +6,9 @@ import { DockerService } from './docker/docker.service';
 import type { DockerodeClient } from './docker/docker.types';
 import { AppDataStore } from './apps/app-data';
 import { AppService } from './apps/app.service';
+import { InstallPlanner } from './apps/install-planner';
+import { loadCatalog } from './catalog/catalog';
+import { PortChecker } from './ports/port-checker';
 import { AuthService } from './auth/auth.service';
 import { createServer } from './http/server';
 
@@ -36,13 +40,18 @@ function main(): void {
     bindAddress: config.containerBindAddress,
   });
   const prisma = getPrismaClient();
-  const appService = new AppService(prisma, dockerService, new AppDataStore(config.dataDir));
+  const catalog = loadCatalog(path.resolve(__dirname, '..', 'catalog'));
+  const dataStore = new AppDataStore(config.dataDir);
+  const appService = new AppService(prisma, dockerService, dataStore);
+  const planner = new InstallPlanner(prisma, catalog, new PortChecker(config.containerBindAddress));
 
   const authService = new AuthService(prisma);
   const app = createServer({
     appService,
     dockerService,
     authService,
+    planner,
+    views: { catalog, dataStore },
     secureCookies: config.trustProxy,
     trustProxy: config.trustProxy,
   });
