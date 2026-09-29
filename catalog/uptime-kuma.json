@@ -1,0 +1,32 @@
+{
+  "id": "uptime-kuma",
+  "name": "Uptime Kuma",
+  "description": "Get alerted when a website, device or service at home stops responding.",
+  "category": "Monitoring",
+  "icon": "icons/uptime-kuma.svg",
+  "image": "louislam/uptime-kuma:2.5.5",
+  "containerPort": 3001,
+  "defaultHostPort": 3001,
+  "volumes": [
+    {
+      "name": "data",
+      "containerPath": "/app/data"
+    }
+  ],
+  "guide": {
+    "afterInstall": [
+      {
+        "text": "Click Open. When asked which database to use, choose SQLite: it is the simplest choice and works well at home."
+      },
+      {
+        "text": "Create the administrator account."
+      },
+      {
+        "text": "Click Add New Monitor, choose what to watch (a website, a device address) and how often to check it."
+      },
+      {
+        "text": "Under Settings, then Notifications, connect the app you want alerts on (email, Telegram and many others)."
+      }
+    ]
+  }
+}

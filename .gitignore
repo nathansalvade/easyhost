@@ -6,3 +6,7 @@ coverage
 *.db-wal
 *.db-shm
 .env
+web/dist
+verify-data/
+test-results/
+playwright-report/

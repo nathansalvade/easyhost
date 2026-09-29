@@ -1,0 +1,35 @@
+{
+  "id": "nextcloud",
+  "name": "Nextcloud",
+  "description": "Files, photos, calendar and contacts on your own server instead of someone else's cloud.",
+  "category": "Files",
+  "icon": "icons/nextcloud.svg",
+  "image": "nextcloud:34.0.4-apache",
+  "containerPort": 80,
+  "defaultHostPort": 8080,
+  "volumes": [
+    {
+      "name": "html",
+      "containerPath": "/var/www/html"
+    }
+  ],
+  "guide": {
+    "afterInstall": [
+      {
+        "text": "Click Open and choose a username and password for the Nextcloud administrator."
+      },
+      {
+        "text": "Leave the database set to SQLite: it is the simplest choice and works well for a household."
+      },
+      {
+        "text": "Click Install and wait a minute while Nextcloud prepares itself."
+      },
+      {
+        "text": "Open Nextcloud always with the address shown on this page: Nextcloud only trusts the address used during setup."
+      },
+      {
+        "text": "Install the Nextcloud desktop or phone app and sign in with that same address."
+      }
+    ]
+  }
+}

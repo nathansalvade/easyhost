@@ -41,6 +41,7 @@ export interface CreateContainerOptions {
   ExposedPorts?: Record<string, unknown>;
   HostConfig?: {
     PortBindings?: Record<string, Array<{ HostPort: string; HostIp?: string }>>;
+    Mounts?: Array<{ Type: 'bind'; Source: string; Target: string }>;
   };
 }
 

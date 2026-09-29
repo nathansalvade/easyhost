@@ -1,0 +1,40 @@
+{
+  "id": "jellyfin",
+  "name": "Jellyfin",
+  "description": "Stream your movies, shows and music to your TV, phone and computer.",
+  "category": "Media",
+  "icon": "icons/jellyfin.svg",
+  "image": "jellyfin/jellyfin:12.1",
+  "containerPort": 8096,
+  "defaultHostPort": 8096,
+  "volumes": [
+    {
+      "name": "config",
+      "containerPath": "/config"
+    },
+    {
+      "name": "cache",
+      "containerPath": "/cache"
+    },
+    {
+      "name": "media",
+      "containerPath": "/media"
+    }
+  ],
+  "guide": {
+    "afterInstall": [
+      {
+        "text": "Click Open. Jellyfin starts a short setup: pick your language and create your Jellyfin user."
+      },
+      {
+        "text": "When asked to add a media library, choose the type (Movies, Shows, Music) and select the folder /media."
+      },
+      {
+        "text": "Put your files in the media folder listed under Data on this page. Jellyfin picks them up on its next library scan."
+      },
+      {
+        "text": "On a phone or TV, install the Jellyfin app and enter the address shown at the top of this page."
+      }
+    ]
+  }
+}

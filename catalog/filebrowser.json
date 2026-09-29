@@ -1,0 +1,44 @@
+{
+  "id": "filebrowser",
+  "name": "File Browser",
+  "description": "Upload, download and share files on your server from any browser.",
+  "category": "Files",
+  "icon": "icons/filebrowser.svg",
+  "image": "filebrowser/filebrowser:v2.63.23",
+  "containerPort": 80,
+  "defaultHostPort": 8081,
+  "volumes": [
+    {
+      "name": "files",
+      "containerPath": "/srv"
+    },
+    {
+      "name": "database",
+      "containerPath": "/database"
+    },
+    {
+      "name": "config",
+      "containerPath": "/config"
+    }
+  ],
+  "dataOwner": {
+    "uid": 1000,
+    "gid": 1000
+  },
+  "guide": {
+    "afterInstall": [
+      {
+        "text": "Open the Logs section on this page and find the line that mentions the password: that is the first-time admin password. It is shown only once, so note it down."
+      },
+      {
+        "text": "Click Open and log in with the username admin and that password."
+      },
+      {
+        "text": "Change the password right away under Settings, then User Management."
+      },
+      {
+        "text": "Files you upload are stored in the files folder listed under Data on this page."
+      }
+    ]
+  }
+}

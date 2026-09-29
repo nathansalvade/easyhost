@@ -1,0 +1,44 @@
+{
+  "id": "audiobookshelf",
+  "name": "Audiobookshelf",
+  "description": "Your own library for audiobooks and podcasts, with progress synced across devices.",
+  "category": "Media",
+  "icon": "icons/audiobookshelf.svg",
+  "image": "ghcr.io/advplyr/audiobookshelf:2.37.0",
+  "containerPort": 80,
+  "defaultHostPort": 13378,
+  "volumes": [
+    {
+      "name": "config",
+      "containerPath": "/config"
+    },
+    {
+      "name": "metadata",
+      "containerPath": "/metadata"
+    },
+    {
+      "name": "audiobooks",
+      "containerPath": "/audiobooks"
+    },
+    {
+      "name": "podcasts",
+      "containerPath": "/podcasts"
+    }
+  ],
+  "guide": {
+    "afterInstall": [
+      {
+        "text": "Click Open and create the administrator account (the first account you create)."
+      },
+      {
+        "text": "Go to Settings, then Libraries, and add a library. Use the folder /audiobooks for books or /podcasts for podcasts."
+      },
+      {
+        "text": "Put your audiobook files in the audiobooks folder listed under Data on this page, then run a library scan."
+      },
+      {
+        "text": "Install the Audiobookshelf app on your phone and enter the address shown at the top of this page."
+      }
+    ]
+  }
+}

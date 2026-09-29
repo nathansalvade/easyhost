@@ -1,4 +1,5 @@
-import { ContainerMissingError, DockerOperationError, DockerUnavailableError } from '../errors';
+import { ContainerMissingError, DockerOperationError, DockerUnavailableError, PortInUseError } from '../errors';
+import type { FixedPort } from '../catalog/catalog.schema';
 import type { DaemonError, DockerodeClient } from './docker.types';
 
 const CONNECTION_ERROR_CODES = new Set(['ENOENT', 'EACCES', 'ECONNREFUSED']);
@@ -9,6 +10,8 @@ export interface CreateAndStartOptions {
   hostPort: number;
   containerPort: number;
   env?: Record<string, string>;
+  mounts?: Array<{ hostPath: string; containerPath: string }>;
+  fixedPorts?: FixedPort[];
 }
 
 export interface LogsOptions {
@@ -29,6 +32,19 @@ function toEnvArray(env: Record<string, string> | undefined): string[] {
     return [];
   }
   return Object.entries(env).map(([key, value]) => `${key}=${value}`);
+}
+
+// Linux daemon, and Docker Desktop on macOS/Windows ("ports are not available",
+// "Only one usage of each socket address").
+const PORT_CONFLICT = /port is already allocated|address already in use|ports are not available|only one usage of each socket address/i;
+
+function portConflictFrom(err: unknown, fallbackPort: number): PortInUseError | undefined {
+  if (!(err instanceof Error) || !PORT_CONFLICT.test(err.message)) return undefined;
+  // The port follows the bound address, e.g. "0.0.0.0:53" or "[::]:53", so an
+  // earlier colon in the message (such as "endpoint x:") is never taken for it.
+  const port = /(?:\d{1,3}(?:\.\d{1,3}){3}|\]):(\d{1,5})/.exec(err.message);
+  const protocol = /udp/i.test(err.message) ? 'udp' : 'tcp';
+  return new PortInUseError(port ? Number(port[1]) : fallbackPort, protocol);
 }
 
 /** Demultiplexes Docker's stdout/stderr stream framing (8-byte frame headers). */
@@ -84,8 +100,8 @@ export interface DockerServiceOptions {
   maxTail?: number;
   /**
    * Host address that published container ports are bound to. Defaults to
-   * loopback so deployed apps are not reachable from the network unless an
-   * operator explicitly opts in (see `CONTAINER_BIND_ADDRESS` in config.ts).
+   * all interfaces so apps open from other home devices at server-IP:port
+   * (see `CONTAINER_BIND_ADDRESS` in config.ts).
    */
   bindAddress?: string;
 }
@@ -102,14 +118,17 @@ export class DockerService implements IDockerService {
     this.bindAddress = bindAddress;
   }
 
+  /**
+   * Docker's own text stays server-side: it is kept as `cause` (logged by the
+   * error middleware), never in the message a client receives.
+   */
   private translateError(err: unknown): DockerUnavailableError | DockerOperationError {
-    if (isDaemonError(err)) {
-      if (err.code && CONNECTION_ERROR_CODES.has(err.code)) {
-        return new DockerUnavailableError(err.message);
-      }
-      return new DockerOperationError(err.message);
-    }
-    return new DockerOperationError('Unknown docker error');
+    const translated =
+      isDaemonError(err) && err.code && CONNECTION_ERROR_CODES.has(err.code)
+        ? new DockerUnavailableError()
+        : new DockerOperationError();
+    translated.cause = err;
+    return translated;
   }
 
   async pullImage(image: string): Promise<void> {
@@ -131,23 +150,32 @@ export class DockerService implements IDockerService {
   }
 
   async createAndStart(options: CreateAndStartOptions): Promise<string> {
-    const { name, image, hostPort, containerPort, env } = options;
-    const portKey = `${containerPort}/tcp`;
+    const { name, image, hostPort, containerPort, env, mounts = [], fixedPorts = [] } = options;
+    const published = [{ containerPort, hostPort, protocol: 'tcp' as const }, ...fixedPorts];
+    const exposedPorts: Record<string, unknown> = {};
+    const portBindings: Record<string, Array<{ HostPort: string; HostIp: string }>> = {};
+    for (const p of published) {
+      const key = `${p.containerPort}/${p.protocol}`;
+      exposedPorts[key] = {};
+      portBindings[key] = [...(portBindings[key] ?? []), { HostPort: String(p.hostPort), HostIp: this.bindAddress }];
+    }
 
     const container = await this.docker.createContainer({
       name,
       Image: image,
       Env: toEnvArray(env),
-      ExposedPorts: { [portKey]: {} },
+      ExposedPorts: exposedPorts,
       HostConfig: {
-        PortBindings: { [portKey]: [{ HostPort: String(hostPort), HostIp: this.bindAddress }] },
+        PortBindings: portBindings,
+        // The Mounts API, not Binds strings: "C:\\..." paths and spaces break Binds.
+        Mounts: mounts.map((m) => ({ Type: 'bind' as const, Source: m.hostPath, Target: m.containerPath })),
       },
     });
 
     try {
       await container.start();
     } catch (err) {
-      const translated = this.translateError(err);
+      const translated = portConflictFrom(err, hostPort) ?? this.translateError(err);
       try {
         await container.remove({ force: true });
       } catch {

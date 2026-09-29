@@ -1,8 +1,20 @@
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
 import { Prisma, PrismaClient } from '@prisma/client';
-import { AppService } from './app.service';
-import { ContainerMissingError, DockerOperationError, NotFoundError } from '../errors';
+import { AppDataStore } from './app-data';
+import { AppService, INSTALL_MESSAGES } from './app.service';
+import {
+  ContainerMissingError,
+  DockerOperationError,
+  DockerUnavailableError,
+  NotFoundError,
+  NotInstalledError,
+  PortInUseError,
+} from '../errors';
 import { createTempDb } from '../../test/helpers/temp-db';
 import type { IDockerService } from '../docker/docker.service';
+import type { CreateAppInput } from './app.types';
 
 function makeDockerMock(): jest.Mocked<IDockerService> {
   return {
@@ -17,17 +29,39 @@ function makeDockerMock(): jest.Mocked<IDockerService> {
   };
 }
 
+function deferred<T = void>() {
+  let resolve!: (v: T) => void;
+  let reject!: (e: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
+
 describe('AppService', () => {
   let prisma: PrismaClient;
   let cleanup: () => Promise<void>;
+  let dataDir: string;
+  let dataStore: AppDataStore;
 
   beforeAll(() => {
     ({ prisma, cleanup } = createTempDb());
+    dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'easyhost-appdata-'));
+    dataStore = new AppDataStore(dataDir);
   });
 
   afterAll(async () => {
     await cleanup();
+    fs.rmSync(dataDir, { recursive: true, force: true });
   });
+
+  /** Creates an app and waits for its background install, returning the settled row. */
+  async function createInstalled(service: AppService, input: CreateAppInput) {
+    const app = await service.create(input);
+    await service.settled();
+    return prisma.app.findUniqueOrThrow({ where: { id: app.id } });
+  }
 
   afterEach(async () => {
     await prisma.app.deleteMany();
@@ -35,9 +69,9 @@ describe('AppService', () => {
   });
 
   describe('create', () => {
-    it('deploys the app: pulls, creates+starts, and persists RUNNING with the containerId', async () => {
+    it('deploys the app in the background: pulls, creates+starts, and persists RUNNING with the containerId', async () => {
       const docker = makeDockerMock();
-      const service = new AppService(prisma, docker);
+      const service = new AppService(prisma, docker, dataStore);
 
       const app = await service.create({
         name: 'my-app',
@@ -46,6 +80,7 @@ describe('AppService', () => {
         containerPort: 80,
         env: { FOO: 'bar' },
       });
+      await service.settled();
 
       expect(docker.pullImage).toHaveBeenCalledWith('nginx:latest');
       expect(docker.createAndStart).toHaveBeenCalledWith(
@@ -57,18 +92,42 @@ describe('AppService', () => {
           env: { FOO: 'bar' },
         }),
       );
-      expect(app.status).toBe('RUNNING');
-      expect(app.containerId).toBe('container-1');
+      expect(app.status).toBe('PENDING');
 
       const persisted = await prisma.app.findUniqueOrThrow({ where: { id: app.id } });
       expect(persisted.status).toBe('RUNNING');
       expect(persisted.containerId).toBe('container-1');
+      expect(persisted.lastError).toBeNull();
+    });
+
+    it('stores catalog id, volumes, fixed ports and secrets on the row and passes fixed ports to Docker', async () => {
+      const docker = makeDockerMock();
+      const service = new AppService(prisma, docker, dataStore);
+      const fixedPorts = [{ containerPort: 53, hostPort: 53, protocol: 'udp' as const }];
+      const app = await service.create({
+        name: 'with-meta',
+        image: 'pihole/pihole:2026.09.0',
+        hostPort: 8082,
+        containerPort: 80,
+        catalogId: 'pihole',
+        volumes: [{ name: 'config', containerPath: '/etc/pihole' }],
+        fixedPorts,
+        secrets: { adminPassword: 's3cret' },
+      });
+      await service.settled();
+      expect(app).toMatchObject({
+        catalogId: 'pihole',
+        volumes: JSON.stringify([{ name: 'config', containerPath: '/etc/pihole' }]),
+        fixedPorts: JSON.stringify(fixedPorts),
+        secrets: JSON.stringify({ adminPassword: 's3cret' }),
+      });
+      expect(docker.createAndStart).toHaveBeenCalledWith(expect.objectContaining({ fixedPorts }));
     });
 
     it('rejects with ConflictError NAME_TAKEN before any daemon call when the name is already used', async () => {
       const docker = makeDockerMock();
-      const service = new AppService(prisma, docker);
-      await service.create({ name: 'dup', image: 'nginx', hostPort: 1000, containerPort: 1000 });
+      const service = new AppService(prisma, docker, dataStore);
+      await createInstalled(service, { name: 'dup', image: 'nginx', hostPort: 1000, containerPort: 1000 });
       docker.pullImage.mockClear();
       docker.createAndStart.mockClear();
 
@@ -82,8 +141,8 @@ describe('AppService', () => {
 
     it('rejects with ConflictError PORT_TAKEN before any daemon call when the hostPort is already used', async () => {
       const docker = makeDockerMock();
-      const service = new AppService(prisma, docker);
-      await service.create({ name: 'a', image: 'nginx', hostPort: 3000, containerPort: 3000 });
+      const service = new AppService(prisma, docker, dataStore);
+      await createInstalled(service, { name: 'a', image: 'nginx', hostPort: 3000, containerPort: 3000 });
       docker.pullImage.mockClear();
       docker.createAndStart.mockClear();
 
@@ -95,75 +154,45 @@ describe('AppService', () => {
       expect(docker.createAndStart).not.toHaveBeenCalled();
     });
 
-    it('sets status ERROR and keeps the row (without a containerId) when the pull fails', async () => {
-      const docker = makeDockerMock();
-      docker.pullImage.mockRejectedValue(new DockerOperationError('pull failed'));
-      const service = new AppService(prisma, docker);
-
-      await expect(
-        service.create({ name: 'fails', image: 'bad-image', hostPort: 4000, containerPort: 4000 }),
-      ).rejects.toBeInstanceOf(DockerOperationError);
-
-      const persisted = await prisma.app.findUniqueOrThrow({ where: { name: 'fails' } });
-      expect(persisted.status).toBe('ERROR');
-      expect(persisted.containerId).toBeNull();
-    });
-
-    it('sets status ERROR and keeps the row when createAndStart fails', async () => {
-      const docker = makeDockerMock();
-      docker.createAndStart.mockRejectedValue(new DockerOperationError('create failed'));
-      const service = new AppService(prisma, docker);
-
-      await expect(
-        service.create({ name: 'fails2', image: 'nginx', hostPort: 4001, containerPort: 4001 }),
-      ).rejects.toBeInstanceOf(DockerOperationError);
-
-      const persisted = await prisma.app.findUniqueOrThrow({ where: { name: 'fails2' } });
-      expect(persisted.status).toBe('ERROR');
-      expect(persisted.containerId).toBeNull();
-    });
-
     it('keeps the containerId on the ERROR row when the container was created but finalizing the row failed', async () => {
       const docker = makeDockerMock();
       docker.createAndStart.mockResolvedValue('container-known');
-      const service = new AppService(prisma, docker);
+      const service = new AppService(prisma, docker, dataStore);
+      jest.spyOn(console, 'error').mockImplementation(() => undefined);
 
+      const app = await service.create({ name: 'fails3', image: 'nginx', hostPort: 4002, containerPort: 4002 });
       jest.spyOn(prisma.app, 'update').mockRejectedValueOnce(new Error('db hiccup'));
+      await service.settled();
 
-      await expect(
-        service.create({ name: 'fails3', image: 'nginx', hostPort: 4002, containerPort: 4002 }),
-      ).rejects.toThrow('db hiccup');
-
-      const persisted = await prisma.app.findUniqueOrThrow({ where: { name: 'fails3' } });
+      const persisted = await prisma.app.findUniqueOrThrow({ where: { id: app.id } });
       expect(persisted.status).toBe('ERROR');
       expect(persisted.containerId).toBe('container-known');
+      expect(persisted.lastError).toBe(INSTALL_MESSAGES.start);
     });
 
-    it('persists the containerId carried on the error when start and the cleanup removal both fail', async () => {
+    it('persists the orphaned container id when start and cleanup both failed, so remove() can still clean it up', async () => {
       const docker = makeDockerMock();
       const orphanError = new DockerOperationError('docker operation failed');
       orphanError.containerId = 'orphan-container';
       docker.createAndStart.mockRejectedValue(orphanError);
-      const service = new AppService(prisma, docker);
+      const service = new AppService(prisma, docker, dataStore);
+      jest.spyOn(console, 'error').mockImplementation(() => undefined);
 
-      await expect(
-        service.create({ name: 'orphan', image: 'nginx', hostPort: 4003, containerPort: 4003 }),
-      ).rejects.toBe(orphanError);
+      const app = await service.create({ name: 'orphan', image: 'nginx', hostPort: 4003, containerPort: 4003 });
+      await service.settled();
 
-      const persisted = await prisma.app.findUniqueOrThrow({ where: { name: 'orphan' } });
+      const persisted = await prisma.app.findUniqueOrThrow({ where: { id: app.id } });
       expect(persisted.status).toBe('ERROR');
       expect(persisted.containerId).toBe('orphan-container');
 
-      docker.remove.mockClear();
       await service.remove(persisted.id);
-
       expect(docker.remove).toHaveBeenCalledWith('orphan-container', { force: true });
       await expect(prisma.app.findUnique({ where: { id: persisted.id } })).resolves.toBeNull();
     });
 
     it('translates a race-condition unique constraint violation on name into ConflictError NAME_TAKEN', async () => {
       const docker = makeDockerMock();
-      const service = new AppService(prisma, docker);
+      const service = new AppService(prisma, docker, dataStore);
 
       jest.spyOn(prisma.app, 'create').mockRejectedValueOnce(
         new Prisma.PrismaClientKnownRequestError('Unique constraint failed on the fields: (`name`)', {
@@ -182,7 +211,7 @@ describe('AppService', () => {
 
     it('translates a race-condition unique constraint violation on hostPort into ConflictError PORT_TAKEN', async () => {
       const docker = makeDockerMock();
-      const service = new AppService(prisma, docker);
+      const service = new AppService(prisma, docker, dataStore);
 
       jest.spyOn(prisma.app, 'create').mockRejectedValueOnce(
         new Prisma.PrismaClientKnownRequestError('Unique constraint failed on the fields: (`hostPort`)', {
@@ -200,11 +229,189 @@ describe('AppService', () => {
     });
   });
 
+  describe('background install', () => {
+    let docker: jest.Mocked<IDockerService>;
+    let service: AppService;
+    const input = (overrides: { name: string; hostPort: number }) => ({
+      image: 'nginx:1.27',
+      containerPort: 80,
+      ...overrides,
+    });
+
+    beforeEach(() => {
+      docker = makeDockerMock();
+      service = new AppService(prisma, docker, dataStore);
+      jest.spyOn(console, 'error').mockImplementation(() => undefined);
+    });
+
+    it('returns the PENDING row before the download finishes, then becomes RUNNING', async () => {
+      const pull = deferred();
+      docker.pullImage.mockReturnValue(pull.promise);
+
+      const app = await service.create(input({ name: 'bg-ok', hostPort: 9101 }));
+      expect(app.status).toBe('PENDING');
+      expect(docker.createAndStart).not.toHaveBeenCalled();
+
+      pull.resolve();
+      await service.settled();
+      const row = await prisma.app.findUniqueOrThrow({ where: { id: app.id } });
+      expect(row).toMatchObject({ status: 'RUNNING', containerId: 'container-1', lastError: null });
+    });
+
+    it.each([
+      ['a download failure', 'pull', new DockerOperationError('manifest unknown raw-docker-text'), INSTALL_MESSAGES.download],
+      ['Docker being down', 'pull', new DockerUnavailableError('connect ENOENT raw-docker-text'), INSTALL_MESSAGES.dockerDown],
+      ['a start failure', 'start', new DockerOperationError('OCI runtime raw-docker-text'), INSTALL_MESSAGES.start],
+      ['a port conflict', 'start', new PortInUseError(8096, 'tcp'), INSTALL_MESSAGES.portInUse(8096)],
+    ])('stores a readable lastError for %s and never the raw text', async (_label, stage, error, message) => {
+      if (stage === 'pull') docker.pullImage.mockRejectedValue(error);
+      else docker.createAndStart.mockRejectedValue(error);
+
+      const app = await service.create(input({ name: 'bg-fail', hostPort: 9201 }));
+      await service.settled();
+      const row = await prisma.app.findUniqueOrThrow({ where: { id: app.id } });
+      expect(row.status).toBe('ERROR');
+      expect(row.containerId).toBeNull();
+      expect(row.lastError).toBe(message);
+      expect(row.lastError).not.toContain('raw-docker-text');
+    });
+
+    it('removes the new container if the app was deleted while installing', async () => {
+      const pull = deferred();
+      docker.pullImage.mockReturnValue(pull.promise);
+      docker.createAndStart.mockResolvedValue('late-container');
+
+      const app = await service.create(input({ name: 'bg-deleted', hostPort: 9702 }));
+      await service.remove(app.id);
+      pull.resolve();
+      await service.settled();
+
+      expect(docker.remove).toHaveBeenCalledWith('late-container', { force: true });
+      await expect(prisma.app.findUnique({ where: { id: app.id } })).resolves.toBeNull();
+    });
+
+    it('marks installs left PENDING by a restart as interrupted, leaving other apps alone', async () => {
+      const stale = await prisma.app.create({
+        data: { name: 'bg-stale', image: 'x:1', hostPort: 9703, containerPort: 80, status: 'PENDING' },
+      });
+      const running = await prisma.app.create({
+        data: { name: 'bg-running', image: 'x:1', hostPort: 9705, containerPort: 80, status: 'RUNNING' },
+      });
+
+      await expect(service.recoverInterruptedInstalls()).resolves.toBe(1);
+      await expect(prisma.app.findUniqueOrThrow({ where: { id: stale.id } })).resolves.toMatchObject({
+        status: 'ERROR',
+        lastError: INSTALL_MESSAGES.interrupted,
+      });
+      await expect(prisma.app.findUniqueOrThrow({ where: { id: running.id } })).resolves.toMatchObject({
+        status: 'RUNNING',
+        lastError: null,
+      });
+    });
+
+    it.each([
+      ['start', 'RUNNING'],
+      ['stop', 'STOPPED'],
+    ] as const)('clears lastError when %s succeeds', async (action, status) => {
+      const row = await prisma.app.create({
+        data: {
+          name: 'bg-restart',
+          image: 'x:1',
+          hostPort: 9704,
+          containerPort: 80,
+          status: 'ERROR',
+          containerId: 'c-restart',
+          lastError: 'old',
+        },
+      });
+      await expect(service[action](row.id)).resolves.toMatchObject({ status, lastError: null });
+    });
+  });
+
+  describe('data folders', () => {
+    let docker: jest.Mocked<IDockerService>;
+    let service: AppService;
+    const volumes = [{ name: 'config', containerPath: '/config' }];
+
+    beforeEach(() => {
+      docker = makeDockerMock();
+      service = new AppService(prisma, docker, dataStore);
+    });
+
+    it('mounts data folders when installing and keeps them on removal', async () => {
+      const app = await service.create({ name: 'data-keep', image: 'x:1', hostPort: 9801, containerPort: 80, volumes });
+      await service.settled();
+      const mounts = docker.createAndStart.mock.calls.at(-1)![0].mounts!;
+      expect(mounts).toEqual([{ hostPath: path.join(dataDir, 'apps', app.id, 'config'), containerPath: '/config' }]);
+
+      const result = await service.remove(app.id);
+      expect(result).toEqual({ dataPath: path.join(dataDir, 'apps', app.id), dataDeleted: false });
+      expect(fs.existsSync(mounts[0].hostPath)).toBe(true);
+    });
+
+    it('deletes data only when asked', async () => {
+      const app = await service.create({ name: 'data-drop', image: 'x:1', hostPort: 9802, containerPort: 80, volumes });
+      await service.settled();
+      const result = await service.remove(app.id, { deleteData: true });
+      expect(result).toEqual({ dataPath: path.join(dataDir, 'apps', app.id), dataDeleted: true });
+      expect(fs.existsSync(path.join(dataDir, 'apps', app.id))).toBe(false);
+    });
+
+    it('still removes the app when deleting its data fails, and says so', async () => {
+      jest.spyOn(console, 'error').mockImplementation(() => undefined);
+      const failing = new AppDataStore(dataDir, { rm: jest.fn().mockRejectedValue(new Error('EBUSY')) });
+      const svc = new AppService(prisma, docker, failing);
+      const app = await svc.create({ name: 'data-busy', image: 'x:1', hostPort: 9803, containerPort: 80, volumes });
+      await svc.settled();
+      await expect(svc.remove(app.id, { deleteData: true })).resolves.toMatchObject({ dataDeleted: false });
+      await expect(prisma.app.findUnique({ where: { id: app.id } })).resolves.toBeNull();
+    });
+
+    it('does not leave a data folder behind when an app is removed with its data while installing', async () => {
+      const pull = deferred();
+      docker.pullImage.mockReturnValue(pull.promise);
+      const app = await service.create({ name: 'data-race', image: 'x:1', hostPort: 9805, containerPort: 80, volumes });
+      await expect(service.remove(app.id, { deleteData: true })).resolves.toMatchObject({ dataDeleted: true });
+      pull.resolve();
+      await service.settled();
+      expect(fs.existsSync(path.join(dataDir, 'apps', app.id))).toBe(false);
+    });
+
+    it('removes a container the install saved between remove() reading and deleting the row', async () => {
+      const app = await service.create({ name: 'data-race2', image: 'x:1', hostPort: 9806, containerPort: 80 });
+      await service.settled();
+      // Simulate the race: remove() reads the row before the install stored its container.
+      const findUnique = prisma.app.findUnique.bind(prisma.app);
+      jest.spyOn(prisma.app, 'findUnique').mockImplementationOnce((async () => ({
+        ...(await findUnique({ where: { id: app.id } })),
+        containerId: null,
+        status: 'PENDING',
+      })) as never);
+      await service.remove(app.id);
+      expect(docker.remove).toHaveBeenCalledWith('container-1', { force: true });
+    });
+
+    it('hands the data folders to the image user given by the catalog', async () => {
+      const chown = jest.fn().mockResolvedValue(undefined);
+      const svc = new AppService(prisma, docker, new AppDataStore(dataDir, { chown, platform: 'linux' }));
+      const app = await svc.create({
+        name: 'data-owner',
+        image: 'x:1',
+        hostPort: 9804,
+        containerPort: 80,
+        volumes,
+        dataOwner: { uid: 1000, gid: 1000 },
+      });
+      await svc.settled();
+      expect(chown).toHaveBeenCalledWith(path.join(dataDir, 'apps', app.id, 'config'), 1000, 1000);
+    });
+  });
+
   describe('start', () => {
     it('starts the container and persists RUNNING', async () => {
       const docker = makeDockerMock();
-      const service = new AppService(prisma, docker);
-      const app = await service.create({ name: 's1', image: 'nginx', hostPort: 6000, containerPort: 6000 });
+      const service = new AppService(prisma, docker, dataStore);
+      const app = await createInstalled(service, { name: 's1', image: 'nginx', hostPort: 6000, containerPort: 6000 });
       await service.stop(app.id);
       docker.start.mockClear();
 
@@ -214,19 +421,17 @@ describe('AppService', () => {
       expect(updated.status).toBe('RUNNING');
     });
 
-    it('throws NotFoundError and never calls docker when the app has no containerId', async () => {
+    it('throws NotInstalledError and never calls docker when the app has no containerId', async () => {
       const docker = makeDockerMock();
       docker.createAndStart.mockRejectedValue(new DockerOperationError('boom'));
-      const service = new AppService(prisma, docker);
+      const service = new AppService(prisma, docker, dataStore);
 
-      await expect(
-        service.create({ name: 'no-container', image: 'nginx', hostPort: 6001, containerPort: 6001 }),
-      ).rejects.toThrow();
+      await createInstalled(service, { name: 'no-container', image: 'nginx', hostPort: 6001, containerPort: 6001 });
       const app = await prisma.app.findUniqueOrThrow({ where: { name: 'no-container' } });
       expect(app.containerId).toBeNull();
       docker.start.mockClear();
 
-      await expect(service.start(app.id)).rejects.toBeInstanceOf(NotFoundError);
+      await expect(service.start(app.id)).rejects.toBeInstanceOf(NotInstalledError);
 
       expect(docker.start).not.toHaveBeenCalled();
       const unchanged = await prisma.app.findUniqueOrThrow({ where: { id: app.id } });
@@ -235,7 +440,7 @@ describe('AppService', () => {
 
     it('throws NotFoundError when the app does not exist', async () => {
       const docker = makeDockerMock();
-      const service = new AppService(prisma, docker);
+      const service = new AppService(prisma, docker, dataStore);
       await expect(service.start('missing-id')).rejects.toBeInstanceOf(NotFoundError);
     });
   });
@@ -243,8 +448,8 @@ describe('AppService', () => {
   describe('stop', () => {
     it('stops the container and persists STOPPED', async () => {
       const docker = makeDockerMock();
-      const service = new AppService(prisma, docker);
-      const app = await service.create({ name: 's2', image: 'nginx', hostPort: 6002, containerPort: 6002 });
+      const service = new AppService(prisma, docker, dataStore);
+      const app = await createInstalled(service, { name: 's2', image: 'nginx', hostPort: 6002, containerPort: 6002 });
 
       const updated = await service.stop(app.id);
 
@@ -252,17 +457,15 @@ describe('AppService', () => {
       expect(updated.status).toBe('STOPPED');
     });
 
-    it('throws NotFoundError and never calls docker when the app has no containerId', async () => {
+    it('throws NotInstalledError and never calls docker when the app has no containerId', async () => {
       const docker = makeDockerMock();
       docker.createAndStart.mockRejectedValue(new DockerOperationError('boom'));
-      const service = new AppService(prisma, docker);
-      await expect(
-        service.create({ name: 'no-container2', image: 'nginx', hostPort: 6003, containerPort: 6003 }),
-      ).rejects.toThrow();
+      const service = new AppService(prisma, docker, dataStore);
+      await createInstalled(service, { name: 'no-container2', image: 'nginx', hostPort: 6003, containerPort: 6003 });
       const app = await prisma.app.findUniqueOrThrow({ where: { name: 'no-container2' } });
       docker.stop.mockClear();
 
-      await expect(service.stop(app.id)).rejects.toBeInstanceOf(NotFoundError);
+      await expect(service.stop(app.id)).rejects.toBeInstanceOf(NotInstalledError);
 
       expect(docker.stop).not.toHaveBeenCalled();
       const unchanged = await prisma.app.findUniqueOrThrow({ where: { id: app.id } });
@@ -273,8 +476,8 @@ describe('AppService', () => {
   describe('remove', () => {
     it('force-removes the container, then deletes the row', async () => {
       const docker = makeDockerMock();
-      const service = new AppService(prisma, docker);
-      const app = await service.create({ name: 'r1', image: 'nginx', hostPort: 6100, containerPort: 6100 });
+      const service = new AppService(prisma, docker, dataStore);
+      const app = await createInstalled(service, { name: 'r1', image: 'nginx', hostPort: 6100, containerPort: 6100 });
 
       await service.remove(app.id);
 
@@ -285,10 +488,8 @@ describe('AppService', () => {
     it('deletes the row without calling docker.remove when there is no containerId', async () => {
       const docker = makeDockerMock();
       docker.createAndStart.mockRejectedValue(new DockerOperationError('boom'));
-      const service = new AppService(prisma, docker);
-      await expect(
-        service.create({ name: 'r2', image: 'nginx', hostPort: 6101, containerPort: 6101 }),
-      ).rejects.toThrow();
+      const service = new AppService(prisma, docker, dataStore);
+      await createInstalled(service, { name: 'r2', image: 'nginx', hostPort: 6101, containerPort: 6101 });
       const app = await prisma.app.findUniqueOrThrow({ where: { name: 'r2' } });
       docker.remove.mockClear();
 
@@ -300,8 +501,8 @@ describe('AppService', () => {
 
     it('still deletes the row when the container is already gone', async () => {
       const docker = makeDockerMock();
-      const service = new AppService(prisma, docker);
-      const app = await service.create({ name: 'r3', image: 'nginx', hostPort: 6102, containerPort: 6102 });
+      const service = new AppService(prisma, docker, dataStore);
+      const app = await createInstalled(service, { name: 'r3', image: 'nginx', hostPort: 6102, containerPort: 6102 });
       // DockerService.remove is idempotent about missing containers, so the
       // mock simply resolves as it would for a container that is already gone.
 
@@ -312,7 +513,7 @@ describe('AppService', () => {
 
     it('throws NotFoundError when the app does not exist', async () => {
       const docker = makeDockerMock();
-      const service = new AppService(prisma, docker);
+      const service = new AppService(prisma, docker, dataStore);
       await expect(service.remove('missing-id')).rejects.toBeInstanceOf(NotFoundError);
     });
   });
@@ -321,8 +522,8 @@ describe('AppService', () => {
     it('delegates to docker.logs with the given tail', async () => {
       const docker = makeDockerMock();
       docker.logs.mockResolvedValue('line1\nline2\n');
-      const service = new AppService(prisma, docker);
-      const app = await service.create({ name: 'l1', image: 'nginx', hostPort: 6200, containerPort: 6200 });
+      const service = new AppService(prisma, docker, dataStore);
+      const app = await createInstalled(service, { name: 'l1', image: 'nginx', hostPort: 6200, containerPort: 6200 });
 
       const logs = await service.logs(app.id, { tail: 50 });
 
@@ -330,24 +531,22 @@ describe('AppService', () => {
       expect(logs).toBe('line1\nline2\n');
     });
 
-    it('throws NotFoundError when the app has no containerId', async () => {
+    it('throws NotInstalledError when the app has no containerId', async () => {
       const docker = makeDockerMock();
       docker.createAndStart.mockRejectedValue(new DockerOperationError('boom'));
-      const service = new AppService(prisma, docker);
-      await expect(
-        service.create({ name: 'l2', image: 'nginx', hostPort: 6201, containerPort: 6201 }),
-      ).rejects.toThrow();
+      const service = new AppService(prisma, docker, dataStore);
+      await createInstalled(service, { name: 'l2', image: 'nginx', hostPort: 6201, containerPort: 6201 });
       const app = await prisma.app.findUniqueOrThrow({ where: { name: 'l2' } });
 
-      await expect(service.logs(app.id, { tail: 50 })).rejects.toBeInstanceOf(NotFoundError);
+      await expect(service.logs(app.id, { tail: 50 })).rejects.toBeInstanceOf(NotInstalledError);
     });
   });
 
   describe('list / get reconciliation', () => {
     it('reconciles a RUNNING row to STOPPED when the container is no longer running, and persists it', async () => {
       const docker = makeDockerMock();
-      const service = new AppService(prisma, docker);
-      const app = await service.create({ name: 'g1', image: 'nginx', hostPort: 6300, containerPort: 6300 });
+      const service = new AppService(prisma, docker, dataStore);
+      const app = await createInstalled(service, { name: 'g1', image: 'nginx', hostPort: 6300, containerPort: 6300 });
       docker.inspectState.mockResolvedValue({ exists: true, running: false });
 
       const fetched = await service.get(app.id);
@@ -359,8 +558,8 @@ describe('AppService', () => {
 
     it('reconciles a STOPPED row to RUNNING when the container is running again, and persists it', async () => {
       const docker = makeDockerMock();
-      const service = new AppService(prisma, docker);
-      const app = await service.create({ name: 'g2', image: 'nginx', hostPort: 6301, containerPort: 6301 });
+      const service = new AppService(prisma, docker, dataStore);
+      const app = await createInstalled(service, { name: 'g2', image: 'nginx', hostPort: 6301, containerPort: 6301 });
       await service.stop(app.id);
       docker.inspectState.mockResolvedValue({ exists: true, running: true });
 
@@ -373,8 +572,8 @@ describe('AppService', () => {
 
     it('reconciles every app in list()', async () => {
       const docker = makeDockerMock();
-      const service = new AppService(prisma, docker);
-      await service.create({ name: 'g3', image: 'nginx', hostPort: 6302, containerPort: 6302 });
+      const service = new AppService(prisma, docker, dataStore);
+      await createInstalled(service, { name: 'g3', image: 'nginx', hostPort: 6302, containerPort: 6302 });
       docker.inspectState.mockResolvedValue({ exists: true, running: false });
 
       const apps = await service.list();
@@ -385,10 +584,8 @@ describe('AppService', () => {
     it('does not call inspectState for apps with no containerId', async () => {
       const docker = makeDockerMock();
       docker.createAndStart.mockRejectedValue(new DockerOperationError('boom'));
-      const service = new AppService(prisma, docker);
-      await expect(
-        service.create({ name: 'g4', image: 'nginx', hostPort: 6303, containerPort: 6303 }),
-      ).rejects.toThrow();
+      const service = new AppService(prisma, docker, dataStore);
+      await createInstalled(service, { name: 'g4', image: 'nginx', hostPort: 6303, containerPort: 6303 });
       docker.inspectState.mockClear();
 
       const app = await service.get((await prisma.app.findUniqueOrThrow({ where: { name: 'g4' } })).id);
@@ -399,14 +596,14 @@ describe('AppService', () => {
 
     it('throws NotFoundError from get() when the app does not exist', async () => {
       const docker = makeDockerMock();
-      const service = new AppService(prisma, docker);
+      const service = new AppService(prisma, docker, dataStore);
       await expect(service.get('missing-id')).rejects.toBeInstanceOf(NotFoundError);
     });
 
     it('reconciles a row to ERROR when the container was deleted outside EasyHost, and persists it', async () => {
       const docker = makeDockerMock();
-      const service = new AppService(prisma, docker);
-      const app = await service.create({ name: 'g5', image: 'nginx', hostPort: 6304, containerPort: 6304 });
+      const service = new AppService(prisma, docker, dataStore);
+      const app = await createInstalled(service, { name: 'g5', image: 'nginx', hostPort: 6304, containerPort: 6304 });
       docker.inspectState.mockResolvedValue({ exists: false, running: false });
 
       const fetched = await service.get(app.id);
@@ -418,16 +615,16 @@ describe('AppService', () => {
 
     it('list() omits an app deleted concurrently (P2025 on reconcile) but still returns the others', async () => {
       const docker = makeDockerMock();
-      const service = new AppService(prisma, docker);
+      const service = new AppService(prisma, docker, dataStore);
       docker.createAndStart.mockResolvedValueOnce('container-g6');
-      const deletedConcurrently = await service.create({
+      const deletedConcurrently = await createInstalled(service, {
         name: 'g6',
         image: 'nginx',
         hostPort: 6305,
         containerPort: 6305,
       });
       docker.createAndStart.mockResolvedValueOnce('container-g7');
-      const stillThere = await service.create({
+      const stillThere = await createInstalled(service, {
         name: 'g7',
         image: 'nginx',
         hostPort: 6306,
@@ -453,8 +650,8 @@ describe('AppService', () => {
 
     it('get() throws NotFoundError when the app is deleted concurrently (P2025 on reconcile)', async () => {
       const docker = makeDockerMock();
-      const service = new AppService(prisma, docker);
-      const app = await service.create({ name: 'g8', image: 'nginx', hostPort: 6307, containerPort: 6307 });
+      const service = new AppService(prisma, docker, dataStore);
+      const app = await createInstalled(service, { name: 'g8', image: 'nginx', hostPort: 6307, containerPort: 6307 });
 
       jest.spyOn(prisma.app, 'update').mockRejectedValueOnce(
         new Prisma.PrismaClientKnownRequestError('An operation failed because it depends on one or more records that were required but not found.', {
@@ -471,8 +668,8 @@ describe('AppService', () => {
   describe('container deleted outside EasyHost', () => {
     it('start persists ERROR and rethrows ContainerMissingError', async () => {
       const docker = makeDockerMock();
-      const service = new AppService(prisma, docker);
-      const app = await service.create({ name: 'm1', image: 'nginx', hostPort: 6400, containerPort: 6400 });
+      const service = new AppService(prisma, docker, dataStore);
+      const app = await createInstalled(service, { name: 'm1', image: 'nginx', hostPort: 6400, containerPort: 6400 });
       docker.start.mockRejectedValue(new ContainerMissingError());
 
       await expect(service.start(app.id)).rejects.toBeInstanceOf(ContainerMissingError);
@@ -483,8 +680,8 @@ describe('AppService', () => {
 
     it('stop persists ERROR and rethrows ContainerMissingError', async () => {
       const docker = makeDockerMock();
-      const service = new AppService(prisma, docker);
-      const app = await service.create({ name: 'm2', image: 'nginx', hostPort: 6401, containerPort: 6401 });
+      const service = new AppService(prisma, docker, dataStore);
+      const app = await createInstalled(service, { name: 'm2', image: 'nginx', hostPort: 6401, containerPort: 6401 });
       docker.stop.mockRejectedValue(new ContainerMissingError());
 
       await expect(service.stop(app.id)).rejects.toBeInstanceOf(ContainerMissingError);
@@ -495,8 +692,8 @@ describe('AppService', () => {
 
     it('logs persists ERROR and rethrows ContainerMissingError', async () => {
       const docker = makeDockerMock();
-      const service = new AppService(prisma, docker);
-      const app = await service.create({ name: 'm3', image: 'nginx', hostPort: 6402, containerPort: 6402 });
+      const service = new AppService(prisma, docker, dataStore);
+      const app = await createInstalled(service, { name: 'm3', image: 'nginx', hostPort: 6402, containerPort: 6402 });
       docker.logs.mockRejectedValue(new ContainerMissingError());
 
       await expect(service.logs(app.id, { tail: 50 })).rejects.toBeInstanceOf(ContainerMissingError);
@@ -507,8 +704,8 @@ describe('AppService', () => {
 
     it('start still rethrows ContainerMissingError when persisting the ERROR status fails', async () => {
       const docker = makeDockerMock();
-      const service = new AppService(prisma, docker);
-      const app = await service.create({ name: 'm5', image: 'nginx', hostPort: 6404, containerPort: 6404 });
+      const service = new AppService(prisma, docker, dataStore);
+      const app = await createInstalled(service, { name: 'm5', image: 'nginx', hostPort: 6404, containerPort: 6404 });
       docker.start.mockRejectedValue(new ContainerMissingError());
       jest.spyOn(prisma.app, 'update').mockRejectedValueOnce(new Error('db down'));
 
@@ -517,8 +714,8 @@ describe('AppService', () => {
 
     it('remove still deletes the row for an ERROR app with a dangling containerId', async () => {
       const docker = makeDockerMock();
-      const service = new AppService(prisma, docker);
-      const app = await service.create({ name: 'm4', image: 'nginx', hostPort: 6403, containerPort: 6403 });
+      const service = new AppService(prisma, docker, dataStore);
+      const app = await createInstalled(service, { name: 'm4', image: 'nginx', hostPort: 6403, containerPort: 6403 });
       docker.start.mockRejectedValue(new ContainerMissingError());
       await expect(service.start(app.id)).rejects.toBeInstanceOf(ContainerMissingError);
       const errored = await prisma.app.findUniqueOrThrow({ where: { id: app.id } });
