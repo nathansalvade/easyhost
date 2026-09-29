@@ -1,7 +1,7 @@
 # EasyHost — Web UI Design (Step 2)
 
 Date: 2026-09-29
-Status: Draft — awaiting owner review
+Status: Implemented
 
 ## Intent
 
@@ -295,6 +295,9 @@ and multi-container apps such as Immich.
   `DATA_DIR/apps/`. If that deletion fails, the app is still removed and the
   response reports the folder that could not be deleted.
 
+Known limitation: installing an app again after removing it (data kept)
+creates a new, empty data folder; the old folder is kept but not reused.
+
 Known limitation: apps cannot yet use folders that already exist on the
 server (for example an existing movie collection for Jellyfin). Users put
 files in the app's data folder. Mapping existing folders is future work.
@@ -432,7 +435,10 @@ Frontend (Vitest + React Testing Library, mocked API):
 - Every backend error code has a message.
 
 CI adds the web typecheck, lint, test and build to the existing Node 20/22
-workflow.
+workflow, plus end-to-end tests (`e2e/`, Playwright): the built server with a
+fresh database and no Docker daemon, driven in Chromium through first run,
+deep-link login, loose recovery-code entry, refused off-site redirects, the
+Docker-off banner and install error, and phone-width layout.
 
 Before completion, the app is run and used in a browser: first run,
 installing a real app where Docker is available, password recovery, and

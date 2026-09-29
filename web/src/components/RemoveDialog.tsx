@@ -11,7 +11,10 @@ export function RemoveDialog({ appName, dataPath, onCancel, onConfirm, busy }: {
   return (
     <div className="card" role="dialog" aria-label={`Remove ${appName}`}>
       <p><strong>Remove {appName}?</strong></p>
-      <p>The app will stop and be removed. Your data stays in {dataPath}, so installing it again later picks up where you left off.</p>
+      <p>
+        The app will stop and be removed. Your data stays in {dataPath}, so nothing is lost. Installing the app
+        again starts with a new, empty folder; the old one is kept until you delete it.
+      </p>
       <label style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', fontWeight: 400 }}>
         <input type="checkbox" style={{ width: 'auto' }} checked={deleteData} onChange={(e) => setDeleteData(e.target.checked)} />
         Delete data too
