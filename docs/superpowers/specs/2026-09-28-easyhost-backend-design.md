@@ -29,6 +29,7 @@ with an API shape a UI can consume without changes.
 | Auth in this step | None. The server binds to `127.0.0.1` |
 | Log delivery | One-shot tail, no streaming |
 | App creation | Full deploy: pull, create, start |
+| Deployed container port binding | `CONTAINER_BIND_ADDRESS` defaults to `127.0.0.1`: the safest, most privacy-preserving default for a self-hoster, since there is no auth |
 
 ## Architecture
 
@@ -67,9 +68,15 @@ Receives a `Dockerode` instance in its constructor. Public surface:
 - `logs(containerId, { tail })` — returns the last N lines as a string,
   demultiplexing Docker's stdout/stderr stream framing.
 - `inspectState(containerId)` — returns the live state used to reconcile status.
+- Published container ports bind to `CONTAINER_BIND_ADDRESS` (default `127.0.0.1`),
+  passed in via the constructor, so deployed apps are not reachable from the
+  network unless an operator explicitly opts in.
 
 Daemon connection errors (`ENOENT`, `EACCES`, `ECONNREFUSED` on the socket) are
-translated into `DockerUnavailableError`.
+translated into `DockerUnavailableError`. If a container is created but both
+`start` and the best-effort cleanup removal fail, its id would otherwise be
+lost; it is carried on the thrown error (never in the message) so the caller
+can still persist and remove it.
 
 ### AppService
 
@@ -87,6 +94,9 @@ Owns every invariant that spans the database and the daemon:
 - A container deleted outside EasyHost is never reported as merely stopped: reconciling,
   starting, stopping, or reading logs for it sets `status = ERROR` and surfaces
   `ContainerMissingError`.
+- If reconciling an app races a concurrent delete of its row, the resulting
+  Prisma "record not found" error is swallowed; `list()` omits that app and
+  `get()` raises `NotFoundError`, instead of a generic 500.
 
 ## Data model
 

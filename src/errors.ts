@@ -10,6 +10,13 @@ export type ErrorCode =
 export class AppError extends Error {
   public readonly status: number;
   public readonly code: ErrorCode;
+  /**
+   * Set only for the narrow case of a Docker container that was created (and
+   * possibly started) but could not be cleaned up after a failure, so its id
+   * would otherwise be lost. Never included in the response body sent to
+   * clients (see `error.middleware.ts`) — it is for server-side recovery only.
+   */
+  public containerId?: string;
 
   constructor(message: string, status: number, code: ErrorCode) {
     super(message);

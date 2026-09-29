@@ -118,11 +118,34 @@ describe('DockerService', () => {
           Env: ['FOO=bar'],
           ExposedPorts: { '80/tcp': {} },
           HostConfig: {
-            PortBindings: { '80/tcp': [{ HostPort: '8080' }] },
+            PortBindings: { '80/tcp': [{ HostPort: '8080', HostIp: '127.0.0.1' }] },
           },
         }),
       );
       expect(container.start).toHaveBeenCalled();
+    });
+
+    it('binds the published port to a custom bind address when configured', async () => {
+      const container = makeContainer({ id: 'abc123' });
+      const docker = makeDocker({
+        createContainer: jest.fn().mockResolvedValue(container),
+      });
+      const service = new DockerService(docker, { bindAddress: '0.0.0.0' });
+
+      await service.createAndStart({
+        name: 'my-app',
+        image: 'nginx:latest',
+        hostPort: 8080,
+        containerPort: 80,
+      });
+
+      expect(docker.createContainer).toHaveBeenCalledWith(
+        expect.objectContaining({
+          HostConfig: {
+            PortBindings: { '80/tcp': [{ HostPort: '8080', HostIp: '0.0.0.0' }] },
+          },
+        }),
+      );
     });
 
     it('best-effort removes the container and rethrows when start fails, without masking the original error', async () => {
@@ -149,6 +172,27 @@ describe('DockerService', () => {
       expect(removeMock).toHaveBeenCalledWith({ force: true });
     });
 
+    it('does not attach a containerId to the error when the cleanup removal succeeds', async () => {
+      const container = makeContainer({
+        id: 'abc123',
+        start: jest.fn().mockRejectedValue(daemonError('boom', { statusCode: 500 })),
+        remove: jest.fn().mockResolvedValue(undefined),
+      });
+      const docker = makeDocker({
+        createContainer: jest.fn().mockResolvedValue(container),
+      });
+      const service = new DockerService(docker);
+
+      await expect(
+        service.createAndStart({
+          name: 'my-app',
+          image: 'nginx:latest',
+          hostPort: 8080,
+          containerPort: 80,
+        }),
+      ).rejects.toMatchObject({ containerId: undefined });
+    });
+
     it('still rethrows the original start error even when the cleanup removal also fails', async () => {
       const container = makeContainer({
         id: 'abc123',
@@ -168,6 +212,27 @@ describe('DockerService', () => {
           containerPort: 80,
         }),
       ).rejects.toMatchObject({ message: expect.stringContaining('start boom') });
+    });
+
+    it('carries the container id on the error when start and the cleanup removal both fail', async () => {
+      const container = makeContainer({
+        id: 'abc123',
+        start: jest.fn().mockRejectedValue(daemonError('start boom', { statusCode: 500 })),
+        remove: jest.fn().mockRejectedValue(daemonError('remove boom', { statusCode: 500 })),
+      });
+      const docker = makeDocker({
+        createContainer: jest.fn().mockResolvedValue(container),
+      });
+      const service = new DockerService(docker);
+
+      await expect(
+        service.createAndStart({
+          name: 'my-app',
+          image: 'nginx:latest',
+          hostPort: 8080,
+          containerPort: 80,
+        }),
+      ).rejects.toMatchObject({ containerId: 'abc123' });
     });
   });
 
@@ -284,7 +349,7 @@ describe('DockerService', () => {
     it('clamps the requested tail to maxTail', async () => {
       const container = makeContainer();
       const docker = makeDocker({ getContainer: jest.fn().mockReturnValue(container) });
-      const service = new DockerService(docker, 500);
+      const service = new DockerService(docker, { maxTail: 500 });
 
       await service.logs('abc123', { tail: 10000 });
 
@@ -296,7 +361,7 @@ describe('DockerService', () => {
     it('passes through a tail within the max unchanged', async () => {
       const container = makeContainer();
       const docker = makeDocker({ getContainer: jest.fn().mockReturnValue(container) });
-      const service = new DockerService(docker, 1000);
+      const service = new DockerService(docker, { maxTail: 1000 });
 
       await service.logs('abc123', { tail: 50 });
 

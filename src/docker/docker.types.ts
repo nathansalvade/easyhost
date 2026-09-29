@@ -40,7 +40,7 @@ export interface CreateContainerOptions {
   Env?: string[];
   ExposedPorts?: Record<string, unknown>;
   HostConfig?: {
-    PortBindings?: Record<string, Array<{ HostPort: string }>>;
+    PortBindings?: Record<string, Array<{ HostPort: string; HostIp?: string }>>;
   };
 }
 

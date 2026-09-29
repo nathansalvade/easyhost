@@ -80,11 +80,27 @@ export interface IDockerService {
   ping(): Promise<boolean>;
 }
 
+export interface DockerServiceOptions {
+  maxTail?: number;
+  /**
+   * Host address that published container ports are bound to. Defaults to
+   * loopback so deployed apps are not reachable from the network unless an
+   * operator explicitly opts in (see `CONTAINER_BIND_ADDRESS` in config.ts).
+   */
+  bindAddress?: string;
+}
+
 export class DockerService implements IDockerService {
+  private readonly maxTail: number;
+  private readonly bindAddress: string;
+
   constructor(
     private readonly docker: DockerodeClient,
-    private readonly maxTail = 1000,
-  ) {}
+    { maxTail = 1000, bindAddress = '127.0.0.1' }: DockerServiceOptions = {},
+  ) {
+    this.maxTail = maxTail;
+    this.bindAddress = bindAddress;
+  }
 
   private translateError(err: unknown): DockerUnavailableError | DockerOperationError {
     if (isDaemonError(err)) {
@@ -124,7 +140,7 @@ export class DockerService implements IDockerService {
       Env: toEnvArray(env),
       ExposedPorts: { [portKey]: {} },
       HostConfig: {
-        PortBindings: { [portKey]: [{ HostPort: String(hostPort) }] },
+        PortBindings: { [portKey]: [{ HostPort: String(hostPort), HostIp: this.bindAddress }] },
       },
     });
 
@@ -135,7 +151,10 @@ export class DockerService implements IDockerService {
       try {
         await container.remove({ force: true });
       } catch {
-        // Best-effort cleanup: a failure here must not mask the original error.
+        // Best-effort cleanup failed too: the container still exists but its
+        // id would otherwise be lost. Carry it on the error (never in the
+        // message) so callers can persist it and remove it later.
+        translated.containerId = container.id;
       }
       throw translated;
     }

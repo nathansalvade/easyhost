@@ -1,5 +1,5 @@
 import { Prisma, PrismaClient, App } from '@prisma/client';
-import { ConflictError, ContainerMissingError, NotFoundError } from '../errors';
+import { AppError, ConflictError, ContainerMissingError, NotFoundError } from '../errors';
 import type { IDockerService } from '../docker/docker.service';
 import type { AppStatus, CreateAppInput, LogsInput } from './app.types';
 
@@ -8,6 +8,12 @@ const RECONCILABLE_STATUSES = new Set<AppStatus>(['RUNNING', 'STOPPED']);
 function isUniqueConstraintError(err: unknown): err is Prisma.PrismaClientKnownRequestError {
   return (
     err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002'
+  );
+}
+
+function isRecordNotFoundError(err: unknown): err is Prisma.PrismaClientKnownRequestError {
+  return (
+    err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2025'
   );
 }
 
@@ -80,9 +86,13 @@ export class AppService implements IAppService {
         data: { containerId, status: 'RUNNING' },
       });
     } catch (err) {
+      // If the container was created but start and the best-effort cleanup
+      // both failed, DockerService carries the orphaned container's id on
+      // the error so the row (and the container) can still be recovered.
+      const idFromError = err instanceof AppError ? err.containerId : undefined;
       await this.prisma.app.update({
         where: { id: app.id },
-        data: { containerId: containerId ?? null, status: 'ERROR' },
+        data: { containerId: containerId ?? idFromError ?? null, status: 'ERROR' },
       });
       throw err;
     }
@@ -139,12 +149,17 @@ export class AppService implements IAppService {
 
   async list(): Promise<App[]> {
     const apps = await this.prisma.app.findMany();
-    return Promise.all(apps.map((app) => this.reconcile(app)));
+    const reconciled = await Promise.all(apps.map((app) => this.reconcile(app)));
+    return reconciled.filter((app): app is App => app !== null);
   }
 
   async get(id: string): Promise<App> {
     const app = await this.getOrThrow(id);
-    return this.reconcile(app);
+    const reconciled = await this.reconcile(app);
+    if (!reconciled) {
+      throw new NotFoundError(`App ${id} not found`);
+    }
+    return reconciled;
   }
 
   private async getOrThrow(id: string): Promise<App> {
@@ -168,19 +183,33 @@ export class AppService implements IAppService {
     }
   }
 
-  private async reconcile(app: App): Promise<App> {
+  /**
+   * Reconciles the stored status against the live daemon state. If the row
+   * was deleted concurrently (e.g. by a parallel `remove()`), the update
+   * throws Prisma's `P2025` ("record not found"); that is not an error here,
+   * it just means there is nothing left to reconcile, so `null` is returned
+   * and callers treat the app as gone. Any other error still propagates.
+   */
+  private async reconcile(app: App): Promise<App | null> {
     if (!app.containerId || !RECONCILABLE_STATUSES.has(app.status as AppStatus)) {
       return app;
     }
     const state = await this.docker.inspectState(app.containerId);
-    if (!state.exists) {
-      return this.prisma.app.update({ where: { id: app.id }, data: { status: 'ERROR' } });
+    try {
+      if (!state.exists) {
+        return await this.prisma.app.update({ where: { id: app.id }, data: { status: 'ERROR' } });
+      }
+      const expectedStatus: AppStatus = state.running ? 'RUNNING' : 'STOPPED';
+      if (app.status === expectedStatus) {
+        return app;
+      }
+      return await this.prisma.app.update({ where: { id: app.id }, data: { status: expectedStatus } });
+    } catch (err) {
+      if (isRecordNotFoundError(err)) {
+        return null;
+      }
+      throw err;
     }
-    const expectedStatus: AppStatus = state.running ? 'RUNNING' : 'STOPPED';
-    if (app.status === expectedStatus) {
-      return app;
-    }
-    return this.prisma.app.update({ where: { id: app.id }, data: { status: expectedStatus } });
   }
 
   /**

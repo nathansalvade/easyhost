@@ -139,6 +139,28 @@ describe('AppService', () => {
       expect(persisted.containerId).toBe('container-known');
     });
 
+    it('persists the containerId carried on the error when start and the cleanup removal both fail', async () => {
+      const docker = makeDockerMock();
+      const orphanError = new DockerOperationError('docker operation failed');
+      orphanError.containerId = 'orphan-container';
+      docker.createAndStart.mockRejectedValue(orphanError);
+      const service = new AppService(prisma, docker);
+
+      await expect(
+        service.create({ name: 'orphan', image: 'nginx', hostPort: 4003, containerPort: 4003 }),
+      ).rejects.toBe(orphanError);
+
+      const persisted = await prisma.app.findUniqueOrThrow({ where: { name: 'orphan' } });
+      expect(persisted.status).toBe('ERROR');
+      expect(persisted.containerId).toBe('orphan-container');
+
+      docker.remove.mockClear();
+      await service.remove(persisted.id);
+
+      expect(docker.remove).toHaveBeenCalledWith('orphan-container', { force: true });
+      await expect(prisma.app.findUnique({ where: { id: persisted.id } })).resolves.toBeNull();
+    });
+
     it('translates a race-condition unique constraint violation on name into ConflictError NAME_TAKEN', async () => {
       const docker = makeDockerMock();
       const service = new AppService(prisma, docker);
@@ -392,6 +414,57 @@ describe('AppService', () => {
       expect(fetched.status).toBe('ERROR');
       const persisted = await prisma.app.findUniqueOrThrow({ where: { id: app.id } });
       expect(persisted.status).toBe('ERROR');
+    });
+
+    it('list() omits an app deleted concurrently (P2025 on reconcile) but still returns the others', async () => {
+      const docker = makeDockerMock();
+      const service = new AppService(prisma, docker);
+      docker.createAndStart.mockResolvedValueOnce('container-g6');
+      const deletedConcurrently = await service.create({
+        name: 'g6',
+        image: 'nginx',
+        hostPort: 6305,
+        containerPort: 6305,
+      });
+      docker.createAndStart.mockResolvedValueOnce('container-g7');
+      const stillThere = await service.create({
+        name: 'g7',
+        image: 'nginx',
+        hostPort: 6306,
+        containerPort: 6306,
+      });
+
+      // `findMany` returns rows in creation order, and `reconcile` awaits
+      // `inspectState` before calling `update`, so the first `update` call
+      // queued corresponds to the first-created app (`deletedConcurrently`).
+      jest.spyOn(prisma.app, 'update').mockRejectedValueOnce(
+        new Prisma.PrismaClientKnownRequestError('An operation failed because it depends on one or more records that were required but not found.', {
+          code: 'P2025',
+          clientVersion: '5.22.0',
+        }),
+      );
+      docker.inspectState.mockResolvedValue({ exists: true, running: false });
+
+      const apps = await service.list();
+
+      expect(apps.map((a) => a.id)).not.toContain(deletedConcurrently.id);
+      expect(apps.map((a) => a.id)).toContain(stillThere.id);
+    });
+
+    it('get() throws NotFoundError when the app is deleted concurrently (P2025 on reconcile)', async () => {
+      const docker = makeDockerMock();
+      const service = new AppService(prisma, docker);
+      const app = await service.create({ name: 'g8', image: 'nginx', hostPort: 6307, containerPort: 6307 });
+
+      jest.spyOn(prisma.app, 'update').mockRejectedValueOnce(
+        new Prisma.PrismaClientKnownRequestError('An operation failed because it depends on one or more records that were required but not found.', {
+          code: 'P2025',
+          clientVersion: '5.22.0',
+        }),
+      );
+      docker.inspectState.mockResolvedValue({ exists: true, running: false });
+
+      await expect(service.get(app.id)).rejects.toBeInstanceOf(NotFoundError);
     });
   });
 
