@@ -243,6 +243,23 @@ describe('auth routes', () => {
     expect(res.status).toBe(429);
   });
 
+  it('never makes a recovery wait behind a slow login', async () => {
+    const { app, authService } = build({ authenticated: false });
+    let finishLogin!: () => void;
+    authService.login.mockReturnValue(
+      new Promise((resolve) => {
+        finishLogin = () => resolve({ sessionToken: 'tok' });
+      }),
+    );
+    authService.recover.mockResolvedValue({ recoveryCode: 'NEW', sessionToken: 'tok2' });
+    const login = request(app).post('/api/auth/login').send({ password: 'right password' }).then((r) => r);
+    await new Promise((r) => setTimeout(r, 20));
+    const recover = await request(app).post('/api/auth/recover').send({ recoveryCode: 'x', newPassword: 'long enough pw' });
+    expect(recover.status).toBe(200);
+    finishLogin();
+    expect((await login).status).toBe(204);
+  });
+
   it('counts recovery attempts separately from logins', async () => {
     const { app, authService } = build({ authenticated: false });
     authService.login.mockRejectedValue(new InvalidCredentialsError());

@@ -82,7 +82,12 @@ export function createAuthRouter({
   // pass `check` while a slow scrypt verification is pending.
   let queue: Promise<unknown> = Promise.resolve();
 
-  function limited<T>({ client, prefix, global }: Limits, req: Request, attempt: () => Promise<T>): Promise<T> {
+  function limited<T>(
+    { client, prefix, global }: Limits,
+    req: Request,
+    attempt: () => Promise<T>,
+    { queued = true } = {},
+  ): Promise<T> {
     const run = async (): Promise<T> => {
       const key = clientAddress(req.ip);
       const prefixKey = ipv6Prefix(key);
@@ -111,6 +116,7 @@ export function createAuthRouter({
         throw err;
       }
     };
+    if (!queued) return run();
     const result = queue.then(run, run);
     queue = result.catch(() => undefined);
     return result;
@@ -138,7 +144,10 @@ export function createAuthRouter({
 
   router.post('/recover', asyncHandler(async (req, res) => {
     const { recoveryCode, newPassword } = parse(recoverBody, req.body);
-    const result = await limited(recoveryLimits, req, () => auth.recover(recoveryCode, newPassword));
+    // Not queued behind logins: checking the code is cheap (a SHA-256), so a
+    // flood of recovery attempts can neither delay a login nor tie up the CPU.
+    // Races between two valid recoveries are settled inside auth.recover().
+    const result = await limited(recoveryLimits, req, () => auth.recover(recoveryCode, newPassword), { queued: false });
     setSession(res, result.sessionToken);
     // A new password: devices that knew the old one are no longer trusted.
     trustDevice(req, res, { revokeOthers: true });

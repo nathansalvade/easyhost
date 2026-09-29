@@ -126,6 +126,21 @@ describe('AuthService', () => {
       ({ recoveryCode: firstCode } = await auth.setup('original password'));
     });
 
+    it('rejects a wrong code without running scrypt, so a flood of attempts stays cheap', async () => {
+      const hash = jest.spyOn(crypto, 'hashSecret');
+      const verify = jest.spyOn(crypto, 'verifySecret');
+      try {
+        await expect(auth.recover('AAAAA-AAAAA-AAAAA-AAAAA', 'another password')).rejects.toMatchObject({
+          code: 'INVALID_RECOVERY_CODE',
+        });
+        expect(hash).not.toHaveBeenCalled();
+        expect(verify).not.toHaveBeenCalled();
+      } finally {
+        hash.mockRestore();
+        verify.mockRestore();
+      }
+    });
+
     it('sets the new password, invalidates the old one and the old code, and returns a new working code', async () => {
       const result = await auth.recover(firstCode, 'recovered password');
       expect(result.recoveryCode).not.toBe(firstCode);

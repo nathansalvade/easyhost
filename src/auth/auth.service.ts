@@ -9,9 +9,11 @@ import {
 import {
   generateRecoveryCode,
   generateSessionToken,
+  hashRecoveryCode,
   hashSecret,
   hashToken,
   normalizeRecoveryCode,
+  verifyRecoveryCode,
   verifySecret,
 } from './crypto';
 
@@ -61,10 +63,8 @@ export class AuthService implements IAuthService {
       throw new SetupAlreadyDoneError();
     }
     const recoveryCode = generateRecoveryCode();
-    const [passwordHash, recoveryCodeHash] = await Promise.all([
-      hashSecret(password),
-      hashSecret(normalizeRecoveryCode(recoveryCode)),
-    ]);
+    const passwordHash = await hashSecret(password);
+    const recoveryCodeHash = hashRecoveryCode(normalizeRecoveryCode(recoveryCode));
     try {
       await this.prisma.account.create({ data: { id: ACCOUNT_ID, passwordHash, recoveryCodeHash } });
     } catch (err) {
@@ -108,14 +108,13 @@ export class AuthService implements IAuthService {
   async recover(recoveryCode: string, newPassword: string) {
     assertPasswordLength(newPassword);
     const account = await this.prisma.account.findUnique({ where: { id: ACCOUNT_ID } });
-    if (!account || !(await verifySecret(normalizeRecoveryCode(recoveryCode), account.recoveryCodeHash))) {
+    if (!account || !(await verifyRecoveryCode(normalizeRecoveryCode(recoveryCode), account.recoveryCodeHash))) {
       throw new InvalidRecoveryCodeError();
     }
     const newCode = generateRecoveryCode();
-    const [passwordHash, recoveryCodeHash] = await Promise.all([
-      hashSecret(newPassword),
-      hashSecret(normalizeRecoveryCode(newCode)),
-    ]);
+    // scrypt runs only here, once the code is proven: failed attempts stay cheap.
+    const passwordHash = await hashSecret(newPassword);
+    const recoveryCodeHash = hashRecoveryCode(normalizeRecoveryCode(newCode));
     // Compare-and-swap on the verified code hash: a concurrent recovery that
     // already consumed this code changed the hash, so this update matches 0 rows.
     const sessionToken = await this.prisma.$transaction(async (tx) => {
@@ -156,7 +155,7 @@ export class AuthService implements IAuthService {
     const recoveryCode = generateRecoveryCode();
     await this.prisma.account.update({
       where: { id: ACCOUNT_ID },
-      data: { recoveryCodeHash: await hashSecret(normalizeRecoveryCode(recoveryCode)) },
+      data: { recoveryCodeHash: hashRecoveryCode(normalizeRecoveryCode(recoveryCode)) },
     });
     return { recoveryCode };
   }
