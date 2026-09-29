@@ -51,6 +51,7 @@ export class AppDataStore {
     owner?: DataOwner,
   ): Promise<Array<{ hostPath: string; containerPath: string }>> {
     const dir = this.appDir(appId);
+    await this.lockAppsRoot();
     return Promise.all(
       volumes.map(async (volume) => {
         const hostPath = path.join(dir, volume.name);
@@ -59,6 +60,17 @@ export class AppDataStore {
         return { hostPath, containerPath: volume.containerPath };
       }),
     );
+  }
+
+  /**
+   * Only EasyHost's own user may enter DATA_DIR/apps. Docker resolves bind
+   * mounts as its daemon user, so containers still reach their folders, but
+   * other local accounts can never reach a folder opened by `handOver`.
+   * chmod is explicit because mkdir's mode is narrowed by the umask only.
+   */
+  private async lockAppsRoot(): Promise<void> {
+    await fs.promises.mkdir(this.appsRoot, { recursive: true, mode: 0o700 });
+    await fs.promises.chmod(this.appsRoot, 0o700);
   }
 
   /**

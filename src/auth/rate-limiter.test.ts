@@ -1,4 +1,4 @@
-import { RateLimiter } from './rate-limiter';
+import { RateLimiter, clientKey } from './rate-limiter';
 
 function makeLimiter() {
   let now = 1_000_000;
@@ -112,5 +112,20 @@ describe('RateLimiter', () => {
 
     // 'a' should be gone
     expect(limiter.check('a')).toEqual({ allowed: true });
+  });
+});
+
+describe('clientKey', () => {
+  it.each([
+    ['192.168.1.50', '192.168.1.50'],
+    ['::ffff:192.168.1.50', '192.168.1.50'],
+    ['2001:db8:1:2:aaaa:bbbb:cccc:dddd', '2001:db8:1:2::/64'],
+    ['2001:db8:1:2::1', '2001:db8:1:2::/64'],
+    ['2001:0db8:0001:0002:ffff::9', '2001:db8:1:2::/64'],
+    ['fe80::1%eth0', 'fe80:0:0:0::/64'],
+    ['::1', '0:0:0:0::/64'],
+    [undefined, 'unknown'],
+  ])('%s -> %s', (ip, key) => {
+    expect(clientKey(ip)).toBe(key);
   });
 });

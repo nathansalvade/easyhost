@@ -3,13 +3,16 @@ import { z } from 'zod';
 import { asyncHandler } from './async-handler';
 import { SESSION_COOKIE, sessionCookieOptions } from './auth.middleware';
 import type { IAuthService } from '../auth/auth.service';
-import type { RateLimiter } from '../auth/rate-limiter';
+import { GLOBAL_KEY, GLOBAL_LIMIT, RateLimiter, clientKey } from '../auth/rate-limiter';
 import { AppError, TooManyAttemptsError, ValidationError } from '../errors';
 
 export interface AuthRouterDeps {
   auth: IAuthService;
   loginLimiter: RateLimiter;
   recoveryLimiter: RateLimiter;
+  /** Failures from all clients together; defaults to GLOBAL_LIMIT. */
+  globalLoginLimiter?: RateLimiter;
+  globalRecoveryLimiter?: RateLimiter;
   secureCookies: boolean;
 }
 
@@ -27,8 +30,17 @@ function parse<T>(schema: z.ZodType<T>, body: unknown): T {
   return result.data;
 }
 
-export function createAuthRouter({ auth, loginLimiter, recoveryLimiter, secureCookies }: AuthRouterDeps): Router {
+export function createAuthRouter({
+  auth,
+  loginLimiter,
+  recoveryLimiter,
+  globalLoginLimiter = new RateLimiter(GLOBAL_LIMIT),
+  globalRecoveryLimiter = new RateLimiter(GLOBAL_LIMIT),
+  secureCookies,
+}: AuthRouterDeps): Router {
   const router = Router();
+  const loginLimits = { client: loginLimiter, global: globalLoginLimiter };
+  const recoveryLimits = { client: recoveryLimiter, global: globalRecoveryLimiter };
   const cookieOptions: CookieOptions = sessionCookieOptions(secureCookies);
   const setSession = (res: Response, token: string) => res.cookie(SESSION_COOKIE, token, cookieOptions);
   const tokenOf = (req: Request): string => req.cookies[SESSION_COOKIE];
@@ -38,20 +50,27 @@ export function createAuthRouter({ auth, loginLimiter, recoveryLimiter, secureCo
   // pass `check` while a slow scrypt verification is pending.
   let queue: Promise<unknown> = Promise.resolve();
 
-  function limited<T>(limiter: RateLimiter, req: Request, attempt: () => Promise<T>): Promise<T> {
+  function limited<T>(
+    { client, global }: { client: RateLimiter; global: RateLimiter },
+    req: Request,
+    attempt: () => Promise<T>,
+  ): Promise<T> {
     const run = async (): Promise<T> => {
-      const key = req.ip ?? 'unknown';
-      const decision = limiter.check(key);
-      if (!decision.allowed) {
-        throw new TooManyAttemptsError(decision.retryAfterSeconds);
+      const key = clientKey(req.ip);
+      for (const decision of [client.check(key), global.check(GLOBAL_KEY)]) {
+        if (!decision.allowed) {
+          throw new TooManyAttemptsError(decision.retryAfterSeconds);
+        }
       }
       try {
         const result = await attempt();
-        limiter.reset(key);
+        // Only this client's counter: one success must not reset the global one.
+        client.reset(key);
         return result;
       } catch (err) {
         if (err instanceof AppError && (err.code === 'INVALID_CREDENTIALS' || err.code === 'INVALID_RECOVERY_CODE')) {
-          limiter.recordFailure(key);
+          client.recordFailure(key);
+          global.recordFailure(GLOBAL_KEY);
         }
         throw err;
       }
@@ -74,14 +93,14 @@ export function createAuthRouter({ auth, loginLimiter, recoveryLimiter, secureCo
 
   router.post('/login', asyncHandler(async (req, res) => {
     const { password } = parse(passwordBody, req.body);
-    const { sessionToken } = await limited(loginLimiter, req, () => auth.login(password));
+    const { sessionToken } = await limited(loginLimits, req, () => auth.login(password));
     setSession(res, sessionToken);
     res.status(204).send();
   }));
 
   router.post('/recover', asyncHandler(async (req, res) => {
     const { recoveryCode, newPassword } = parse(recoverBody, req.body);
-    const result = await limited(recoveryLimiter, req, () => auth.recover(recoveryCode, newPassword));
+    const result = await limited(recoveryLimits, req, () => auth.recover(recoveryCode, newPassword));
     setSession(res, result.sessionToken);
     res.json({ recoveryCode: result.recoveryCode });
   }));
@@ -94,13 +113,13 @@ export function createAuthRouter({ auth, loginLimiter, recoveryLimiter, secureCo
 
   router.post('/password', asyncHandler(async (req, res) => {
     const { currentPassword, newPassword } = parse(changeBody, req.body);
-    await limited(loginLimiter, req, () => auth.changePassword(tokenOf(req), currentPassword, newPassword));
+    await limited(loginLimits, req, () => auth.changePassword(tokenOf(req), currentPassword, newPassword));
     res.status(204).send();
   }));
 
   router.post('/recovery-code', asyncHandler(async (req, res) => {
     const { password } = parse(passwordBody, req.body);
-    res.json(await limited(loginLimiter, req, () => auth.regenerateRecoveryCode(password)));
+    res.json(await limited(loginLimits, req, () => auth.regenerateRecoveryCode(password)));
   }));
 
   return router;
