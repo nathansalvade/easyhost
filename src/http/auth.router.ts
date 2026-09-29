@@ -3,7 +3,15 @@ import { z } from 'zod';
 import { asyncHandler } from './async-handler';
 import { SESSION_COOKIE, sessionCookieOptions } from './auth.middleware';
 import type { IAuthService } from '../auth/auth.service';
-import { GLOBAL_KEY, GLOBAL_LIMIT, RateLimiter, clientKey } from '../auth/rate-limiter';
+import {
+  GLOBAL_KEY,
+  GLOBAL_LIMIT,
+  PREFIX_LIMIT,
+  RateLimiter,
+  clientAddress,
+  ipv6Prefix,
+} from '../auth/rate-limiter';
+import { DEVICE_COOKIE, DEVICE_TTL_MS, TrustedDevices } from '../auth/trusted-devices';
 import { AppError, TooManyAttemptsError, ValidationError } from '../errors';
 
 export interface AuthRouterDeps {
@@ -13,6 +21,7 @@ export interface AuthRouterDeps {
   /** Failures from all clients together; defaults to GLOBAL_LIMIT. */
   globalLoginLimiter?: RateLimiter;
   globalRecoveryLimiter?: RateLimiter;
+  trustedDevices?: TrustedDevices;
   secureCookies: boolean;
 }
 
@@ -21,6 +30,14 @@ const secret = z.string().min(1).max(1024);
 const passwordBody = z.object({ password: secret });
 const recoverBody = z.object({ recoveryCode: secret, newPassword: secret });
 const changeBody = z.object({ currentPassword: secret, newPassword: secret });
+
+interface Limits {
+  /** The exact address: 5 free failures, then 30 s doubling up to 15 min. */
+  client: RateLimiter;
+  /** The IPv6 /64 and all clients together: slow down only (PREFIX_LIMIT, GLOBAL_LIMIT). */
+  prefix: RateLimiter;
+  global: RateLimiter;
+}
 
 function parse<T>(schema: z.ZodType<T>, body: unknown): T {
   const result = schema.safeParse(body);
@@ -36,11 +53,24 @@ export function createAuthRouter({
   recoveryLimiter,
   globalLoginLimiter = new RateLimiter(GLOBAL_LIMIT),
   globalRecoveryLimiter = new RateLimiter(GLOBAL_LIMIT),
+  trustedDevices = new TrustedDevices(),
   secureCookies,
 }: AuthRouterDeps): Router {
   const router = Router();
-  const loginLimits = { client: loginLimiter, global: globalLoginLimiter };
-  const recoveryLimits = { client: recoveryLimiter, global: globalRecoveryLimiter };
+  const loginLimits: Limits = { client: loginLimiter, prefix: new RateLimiter(PREFIX_LIMIT), global: globalLoginLimiter };
+  const recoveryLimits: Limits = {
+    client: recoveryLimiter,
+    prefix: new RateLimiter(PREFIX_LIMIT),
+    global: globalRecoveryLimiter,
+  };
+  const deviceCookieOptions: CookieOptions = {
+    httpOnly: true,
+    sameSite: 'strict',
+    secure: secureCookies,
+    path: '/api/auth',
+    maxAge: DEVICE_TTL_MS,
+  };
+  const trustDevice = (res: Response) => res.cookie(DEVICE_COOKIE, trustedDevices.issue(), deviceCookieOptions);
   const cookieOptions: CookieOptions = sessionCookieOptions(secureCookies);
   const setSession = (res: Response, token: string) => res.cookie(SESSION_COOKIE, token, cookieOptions);
   const tokenOf = (req: Request): string => req.cookies[SESSION_COOKIE];
@@ -50,26 +80,28 @@ export function createAuthRouter({
   // pass `check` while a slow scrypt verification is pending.
   let queue: Promise<unknown> = Promise.resolve();
 
-  function limited<T>(
-    { client, global }: { client: RateLimiter; global: RateLimiter },
-    req: Request,
-    attempt: () => Promise<T>,
-  ): Promise<T> {
+  function limited<T>({ client, prefix, global }: Limits, req: Request, attempt: () => Promise<T>): Promise<T> {
     const run = async (): Promise<T> => {
-      const key = clientKey(req.ip);
-      for (const decision of [client.check(key), global.check(GLOBAL_KEY)]) {
+      const key = clientAddress(req.ip);
+      const prefixKey = ipv6Prefix(key);
+      // Shared keys, skipped by trusted devices so they can never lock the owner out.
+      const shared: Array<[RateLimiter, string]> = trustedDevices.has(req.cookies?.[DEVICE_COOKIE])
+        ? []
+        : [...(prefixKey ? [[prefix, prefixKey] as [RateLimiter, string]] : []), [global, GLOBAL_KEY]];
+      for (const decision of [client.check(key), ...shared.map(([limiter, k]) => limiter.check(k))]) {
         if (!decision.allowed) {
           throw new TooManyAttemptsError(decision.retryAfterSeconds);
         }
       }
       try {
         const result = await attempt();
-        // Only this client's counter: one success must not reset the global one.
+        // Only this client's counter: one success must not reset the shared ones.
         client.reset(key);
         return result;
       } catch (err) {
         if (err instanceof AppError && (err.code === 'INVALID_CREDENTIALS' || err.code === 'INVALID_RECOVERY_CODE')) {
           client.recordFailure(key);
+          if (prefixKey) prefix.recordFailure(prefixKey);
           global.recordFailure(GLOBAL_KEY);
         }
         throw err;
@@ -88,6 +120,7 @@ export function createAuthRouter({
     const { password } = parse(passwordBody, req.body);
     const { recoveryCode, sessionToken } = await auth.setup(password);
     setSession(res, sessionToken);
+    trustDevice(res);
     res.status(201).json({ recoveryCode });
   }));
 
@@ -95,6 +128,7 @@ export function createAuthRouter({
     const { password } = parse(passwordBody, req.body);
     const { sessionToken } = await limited(loginLimits, req, () => auth.login(password));
     setSession(res, sessionToken);
+    trustDevice(res);
     res.status(204).send();
   }));
 
@@ -102,6 +136,7 @@ export function createAuthRouter({
     const { recoveryCode, newPassword } = parse(recoverBody, req.body);
     const result = await limited(recoveryLimits, req, () => auth.recover(recoveryCode, newPassword));
     setSession(res, result.sessionToken);
+    trustDevice(res);
     res.json({ recoveryCode: result.recoveryCode });
   }));
 

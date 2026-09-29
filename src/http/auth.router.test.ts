@@ -127,7 +127,7 @@ describe('auth routes', () => {
     expect(trusts('10.0.0.7', 0)).toBe(false);
   });
 
-  it('counts every address of one IPv6 /64 as the same client', async () => {
+  it('only slows down, never locks, other addresses in the same IPv6 /64', async () => {
     const { app, authService } = build({ authenticated: false, trustProxy: true });
     authService.login.mockRejectedValue(new InvalidCredentialsError());
     const attempt = (i: number) =>
@@ -135,10 +135,13 @@ describe('auth routes', () => {
         .post('/api/auth/login')
         .set('X-Forwarded-For', `2001:db8:1:2::${i.toString(16)}`)
         .send({ password: 'wrong wrong' });
-    for (let i = 1; i <= 5; i++) {
+    // 20 free failures for the whole /64, one per address so no address is locked on its own.
+    for (let i = 1; i <= 20; i++) {
       expect((await attempt(i)).status).toBe(401);
     }
-    expect((await attempt(99)).status).toBe(429);
+    const slowed = await attempt(21);
+    expect(slowed.status).toBe(429);
+    expect(slowed.body.error.retryAfterSeconds).toBeLessThanOrEqual(5);
   });
 
   it('slows guessing spread over many addresses with a limit across all clients', async () => {
@@ -156,6 +159,34 @@ describe('auth routes', () => {
     const blocked = await attempt(50);
     expect(blocked.status).toBe(429);
     expect(blocked.body.error.retryAfterSeconds).toBeLessThanOrEqual(5);
+  });
+
+  it('lets a device that logged in before past the shared limits, so an attack cannot lock the owner out', async () => {
+    const { app, authService } = build({
+      authenticated: false,
+      trustProxy: true,
+      globalLoginLimiter: new RateLimiter({ freeAttempts: 3, baseDelayMs: 5_000, maxDelayMs: 5_000 }),
+    });
+    authService.login.mockResolvedValueOnce({ sessionToken: 'tok' });
+    const first = await request(app).post('/api/auth/login').set('X-Forwarded-For', '192.168.1.10').send({ password: 'right password' });
+    const deviceCookie = (first.headers['set-cookie'] as unknown as string[]).find((c) => c.startsWith('easyhost_device='))!;
+    expect(deviceCookie).toMatch(/HttpOnly/);
+    expect(deviceCookie).toMatch(/Path=\/api\/auth;/);
+
+    authService.login.mockRejectedValue(new InvalidCredentialsError());
+    for (let i = 1; i <= 5; i++) {
+      await request(app).post('/api/auth/login').set('X-Forwarded-For', `198.51.100.${i}`).send({ password: 'guess guess' });
+    }
+    const stranger = await request(app).post('/api/auth/login').set('X-Forwarded-For', '192.168.1.11').send({ password: 'x' });
+    expect(stranger.status).toBe(429);
+
+    authService.login.mockResolvedValueOnce({ sessionToken: 'tok2' });
+    const owner = await request(app)
+      .post('/api/auth/login')
+      .set('X-Forwarded-For', '192.168.1.12')
+      .set('Cookie', deviceCookie.split(';')[0])
+      .send({ password: 'right password' });
+    expect(owner.status).toBe(204);
   });
 
   it('counts recovery attempts separately from logins', async () => {

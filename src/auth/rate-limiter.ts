@@ -1,16 +1,20 @@
 import { isIPv4, isIPv6 } from 'net';
 
-/**
- * The key failures are counted under. An IPv6 client usually controls a whole
- * /64 (it can pick a fresh address per request), so it counts as one client;
- * IPv4-mapped addresses count as the IPv4 address.
- */
-export function clientKey(ip: string | undefined): string {
+/** The client's own address; IPv4-mapped IPv6 counts as the IPv4 address. */
+export function clientAddress(ip: string | undefined): string {
   if (!ip) return 'unknown';
   const address = ip.split('%')[0];
   const mapped = /^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/i.exec(address);
-  if (mapped) return mapped[1];
-  if (isIPv4(address) || !isIPv6(address)) return address;
+  return mapped ? mapped[1] : address.toLowerCase();
+}
+
+/**
+ * The /64 an IPv6 client sits in (it can usually pick any address there), or
+ * undefined for IPv4. A home LAN shares one /64, so this key is only ever
+ * used to slow attempts down, never to lock anyone out.
+ */
+export function ipv6Prefix(address: string): string | undefined {
+  if (isIPv4(address) || !isIPv6(address)) return undefined;
   const [head, tail = ''] = address.split('::');
   const headGroups = head ? head.split(':') : [];
   const tailGroups = address.includes('::') && tail ? tail.split(':') : [];
@@ -24,11 +28,13 @@ export function clientKey(ip: string | undefined): string {
 }
 
 /**
- * Across all clients: after 50 failures within an hour, at most one attempt
- * every 5 seconds. It slows a distributed guesser to ~720 tries an hour but
- * never locks the owner out for more than a few seconds.
+ * For keys shared by many clients (a /64, or everyone): past the free
+ * failures within an hour, one attempt per 5 seconds. The wait is always a
+ * few seconds, and trusted devices skip these limits entirely.
  */
-export const GLOBAL_LIMIT: RateLimiterOptions = { freeAttempts: 50, baseDelayMs: 5_000, maxDelayMs: 5_000, idleWindowMs: 3_600_000 };
+export const SHARED_LIMIT: RateLimiterOptions = { baseDelayMs: 5_000, maxDelayMs: 5_000, idleWindowMs: 3_600_000 };
+export const PREFIX_LIMIT: RateLimiterOptions = { ...SHARED_LIMIT, freeAttempts: 20 };
+export const GLOBAL_LIMIT: RateLimiterOptions = { ...SHARED_LIMIT, freeAttempts: 50 };
 export const GLOBAL_KEY = 'all';
 
 interface Entry {

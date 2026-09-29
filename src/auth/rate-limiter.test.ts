@@ -1,4 +1,4 @@
-import { RateLimiter, clientKey } from './rate-limiter';
+import { RateLimiter, clientAddress, ipv6Prefix } from './rate-limiter';
 
 function makeLimiter() {
   let now = 1_000_000;
@@ -115,17 +115,29 @@ describe('RateLimiter', () => {
   });
 });
 
-describe('clientKey', () => {
+describe('clientAddress', () => {
   it.each([
     ['192.168.1.50', '192.168.1.50'],
     ['::ffff:192.168.1.50', '192.168.1.50'],
+    ['::FFFF:192.168.1.50', '192.168.1.50'],
+    ['2001:DB8::1', '2001:db8::1'],
+    ['fe80::1%eth0', 'fe80::1'],
+    [undefined, 'unknown'],
+  ])('%s -> %s', (ip, key) => {
+    expect(clientAddress(ip)).toBe(key);
+  });
+});
+
+describe('ipv6Prefix', () => {
+  it.each([
     ['2001:db8:1:2:aaaa:bbbb:cccc:dddd', '2001:db8:1:2::/64'],
     ['2001:db8:1:2::1', '2001:db8:1:2::/64'],
     ['2001:0db8:0001:0002:ffff::9', '2001:db8:1:2::/64'],
-    ['fe80::1%eth0', 'fe80:0:0:0::/64'],
+    ['fe80::1', 'fe80:0:0:0::/64'],
     ['::1', '0:0:0:0::/64'],
-    [undefined, 'unknown'],
-  ])('%s -> %s', (ip, key) => {
-    expect(clientKey(ip)).toBe(key);
+    ['192.168.1.50', undefined],
+    ['unknown', undefined],
+  ])('%s -> %s', (address, prefix) => {
+    expect(ipv6Prefix(address)).toBe(prefix);
   });
 });

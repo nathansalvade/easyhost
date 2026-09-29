@@ -376,6 +376,20 @@ describe('AppService', () => {
       expect(fs.existsSync(path.join(dataDir, 'apps', app.id))).toBe(false);
     });
 
+    it('removes a container the install saved between remove() reading and deleting the row', async () => {
+      const app = await service.create({ name: 'data-race2', image: 'x:1', hostPort: 9806, containerPort: 80 });
+      await service.settled();
+      // Simulate the race: remove() reads the row before the install stored its container.
+      const findUnique = prisma.app.findUnique.bind(prisma.app);
+      jest.spyOn(prisma.app, 'findUnique').mockImplementationOnce((async () => ({
+        ...(await findUnique({ where: { id: app.id } })),
+        containerId: null,
+        status: 'PENDING',
+      })) as never);
+      await service.remove(app.id);
+      expect(docker.remove).toHaveBeenCalledWith('container-1', { force: true });
+    });
+
     it('hands the data folders to the image user given by the catalog', async () => {
       const chown = jest.fn().mockResolvedValue(undefined);
       const svc = new AppService(prisma, docker, new AppDataStore(dataDir, { chown, platform: 'linux' }));
