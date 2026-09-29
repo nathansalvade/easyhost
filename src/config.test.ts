@@ -13,7 +13,7 @@ describe('loadConfig', () => {
       dockerSocketPath: '/var/run/docker.sock',
       dockerHost: undefined,
       logTailMax: 1000,
-      containerBindAddress: '127.0.0.1',
+      containerBindAddress: '0.0.0.0',
     });
   });
 
@@ -49,23 +49,23 @@ describe('loadConfig', () => {
     expect(() => loadConfig({ DATABASE_URL: 'file:./dev.db' })).toThrow();
   });
 
-  it('defaults CONTAINER_BIND_ADDRESS to loopback (127.0.0.1) when unset', () => {
+  it('defaults CONTAINER_BIND_ADDRESS to all interfaces (0.0.0.0) when unset', () => {
     const config = loadConfig({
       DATABASE_URL: 'file:./dev.db',
       DOCKER_SOCKET_PATH: '/var/run/docker.sock',
     });
 
-    expect(config.containerBindAddress).toBe('127.0.0.1');
+    expect(config.containerBindAddress).toBe('0.0.0.0');
   });
 
   it('honours an explicit CONTAINER_BIND_ADDRESS', () => {
     const config = loadConfig({
       DATABASE_URL: 'file:./dev.db',
       DOCKER_SOCKET_PATH: '/var/run/docker.sock',
-      CONTAINER_BIND_ADDRESS: '0.0.0.0',
+      CONTAINER_BIND_ADDRESS: '127.0.0.1',
     });
 
-    expect(config.containerBindAddress).toBe('0.0.0.0');
+    expect(config.containerBindAddress).toBe('127.0.0.1');
   });
 
   it('throws when CONTAINER_BIND_ADDRESS is not a valid IP address', () => {

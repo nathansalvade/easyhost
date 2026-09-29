@@ -29,7 +29,7 @@ with an API shape a UI can consume without changes.
 | Auth in this step | None. The server binds to `127.0.0.1` |
 | Log delivery | One-shot tail, no streaming |
 | App creation | Full deploy: pull, create, start |
-| Deployed container port binding | `CONTAINER_BIND_ADDRESS` defaults to `127.0.0.1`: the safest, most privacy-preserving default for a self-hoster, since there is no auth |
+| Deployed container port binding | `CONTAINER_BIND_ADDRESS` defaults to `0.0.0.0` so apps open from other home devices via `server-IP:port` (the standard self-hosting pattern); `127.0.0.1` is available to restrict them to this machine |
 
 ## Architecture
 
@@ -68,9 +68,10 @@ Receives a `Dockerode` instance in its constructor. Public surface:
 - `logs(containerId, { tail })` — returns the last N lines as a string,
   demultiplexing Docker's stdout/stderr stream framing.
 - `inspectState(containerId)` — returns the live state used to reconcile status.
-- Published container ports bind to `CONTAINER_BIND_ADDRESS` (default `127.0.0.1`),
-  passed in via the constructor, so deployed apps are not reachable from the
-  network unless an operator explicitly opts in.
+- Published container ports bind to `CONTAINER_BIND_ADDRESS` (default `0.0.0.0`),
+  passed in via the constructor, so deployed apps open from other devices on the
+  home network via `server-IP:port`; an operator can set `127.0.0.1` to
+  restrict them to this machine instead.
 
 Daemon connection errors (`ENOENT`, `EACCES`, `ECONNREFUSED` on the socket) are
 translated into `DockerUnavailableError`. If a container is created but both

@@ -118,7 +118,7 @@ describe('DockerService', () => {
           Env: ['FOO=bar'],
           ExposedPorts: { '80/tcp': {} },
           HostConfig: {
-            PortBindings: { '80/tcp': [{ HostPort: '8080', HostIp: '127.0.0.1' }] },
+            PortBindings: { '80/tcp': [{ HostPort: '8080', HostIp: '0.0.0.0' }] },
           },
         }),
       );
@@ -130,7 +130,7 @@ describe('DockerService', () => {
       const docker = makeDocker({
         createContainer: jest.fn().mockResolvedValue(container),
       });
-      const service = new DockerService(docker, { bindAddress: '0.0.0.0' });
+      const service = new DockerService(docker, { bindAddress: '127.0.0.1' });
 
       await service.createAndStart({
         name: 'my-app',
@@ -142,7 +142,7 @@ describe('DockerService', () => {
       expect(docker.createContainer).toHaveBeenCalledWith(
         expect.objectContaining({
           HostConfig: {
-            PortBindings: { '80/tcp': [{ HostPort: '8080', HostIp: '0.0.0.0' }] },
+            PortBindings: { '80/tcp': [{ HostPort: '8080', HostIp: '127.0.0.1' }] },
           },
         }),
       );

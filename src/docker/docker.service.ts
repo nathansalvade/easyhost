@@ -96,7 +96,7 @@ export class DockerService implements IDockerService {
 
   constructor(
     private readonly docker: DockerodeClient,
-    { maxTail = 1000, bindAddress = '127.0.0.1' }: DockerServiceOptions = {},
+    { maxTail = 1000, bindAddress = '0.0.0.0' }: DockerServiceOptions = {},
   ) {
     this.maxTail = maxTail;
     this.bindAddress = bindAddress;

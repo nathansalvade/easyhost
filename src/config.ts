@@ -8,9 +8,10 @@ const configSchema = z
     DOCKER_HOST: z.string().min(1).optional(),
     LOG_TAIL_MAX: z.coerce.number().int().positive().default(1000),
     // Operator-level only: the HTTP API has no auth, so this must never be
-    // settable through it. Defaults to loopback so deployed containers are
-    // not reachable from the network unless an operator opts in.
-    CONTAINER_BIND_ADDRESS: z.string().ip().default('127.0.0.1'),
+    // settable through it. Defaults to all interfaces so deployed apps are
+    // reachable from the home network (e.g. http://<server-LAN-IP>:<hostPort>);
+    // set to 127.0.0.1 to restrict them to this machine only.
+    CONTAINER_BIND_ADDRESS: z.string().ip().default('0.0.0.0'),
   })
   .refine((val) => Boolean(val.DOCKER_SOCKET_PATH) || Boolean(val.DOCKER_HOST), {
     message: 'Either DOCKER_SOCKET_PATH or DOCKER_HOST must be set',

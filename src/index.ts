@@ -14,12 +14,11 @@ function isLoopbackAddress(address: string): boolean {
 function main(): void {
   const config = loadConfig();
 
-  if (!isLoopbackAddress(config.containerBindAddress)) {
-    console.warn(
-      `CONTAINER_BIND_ADDRESS is set to ${config.containerBindAddress}, which is not loopback: ` +
-        'deployed apps will be reachable from the network.',
-    );
-  }
+  console.log(
+    isLoopbackAddress(config.containerBindAddress)
+      ? `Deployed apps are published on ${config.containerBindAddress}: reachable only from this machine.`
+      : `Deployed apps are published on ${config.containerBindAddress}: reachable from the local network at http://<server-LAN-IP>:<hostPort>.`,
+  );
 
   const docker = config.dockerHost
     ? new Docker({ host: config.dockerHost })
