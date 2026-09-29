@@ -1,4 +1,5 @@
 import { NavLink, Outlet } from 'react-router-dom';
+import { Banners } from './Banners';
 
 export function Layout() {
   return (
@@ -10,6 +11,7 @@ export function Layout() {
         <NavLink to="/settings">Settings</NavLink>
       </nav>
       <main className="content">
+        <Banners />
         <Outlet />
       </main>
     </div>
