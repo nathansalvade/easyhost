@@ -30,6 +30,10 @@ export class TrustedDevices {
     return token;
   }
 
+  clear(): void {
+    this.expiresAt.clear();
+  }
+
   has(token: string | undefined): boolean {
     if (!token) return false;
     const key = hash(token);

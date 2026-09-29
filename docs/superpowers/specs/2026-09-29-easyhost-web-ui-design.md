@@ -136,6 +136,16 @@ recovery. After 5 consecutive failures, each further attempt must wait
 an exponentially growing delay (starting at 30 s, capped at 15 min);
 responses carry the remaining seconds. A success resets the counter.
 
+Passwords can be weak, so login (and password change) has two more limits
+that only slow attempts down to one per 5 s: per IPv6 /64 after 20 failures
+and across all clients after 50 failures within an hour. Browsers that
+logged in successfully in the last 30 days carry an `easyhost_device`
+cookie (HttpOnly, `Path=/api/auth`, kept in memory) and skip these shared
+limits, so an attacker saturating them cannot lock the owner out. A browser
+without it (new device, or after a restart) can always get in with the
+recovery code: recovery has only the per-address limit, since the code
+cannot be guessed. Recovery and password changes revoke all other devices.
+
 ### Protecting the API
 
 - An auth middleware guards every `/api` route. The only unauthenticated
