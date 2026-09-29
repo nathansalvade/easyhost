@@ -8,7 +8,11 @@ import { AppError } from '../errors';
  */
 export function errorMiddleware(err: unknown, _req: Request, res: Response, _next: NextFunction): void {
   if (err instanceof AppError) {
-    res.status(err.status).json({ error: { code: err.code, message: err.message } });
+    const retryAfter = err.details?.retryAfterSeconds;
+    if (typeof retryAfter === 'number') {
+      res.set('Retry-After', String(retryAfter));
+    }
+    res.status(err.status).json({ error: { code: err.code, message: err.message, ...err.details } });
     return;
   }
 
