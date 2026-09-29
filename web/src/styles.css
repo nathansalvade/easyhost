@@ -47,7 +47,7 @@ label { display: block; margin: 0.75rem 0 0.25rem; font-weight: 600; }
 .notice { background: var(--surface); border-left: 4px solid var(--warn); padding: 0.75rem 1rem; border-radius: 8px; margin-bottom: 1rem; }
 .banner { background: var(--warn); color: #fff; padding: 0.6rem 1rem; }
 .center-page { max-width: 420px; margin: 8vh auto; padding: 0 1rem; }
-.code { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 1.3rem; letter-spacing: 0.08em; padding: 1rem; text-align: center; }
+.code { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: clamp(0.95rem, 4.2vw, 1.3rem); letter-spacing: 0.05em; padding: 1rem 0; text-align: center; white-space: nowrap; overflow-x: auto; }
 pre { background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 0.75rem; overflow-x: auto; white-space: pre-wrap; word-break: break-all; }
 
 .layout { display: grid; grid-template-columns: 220px 1fr; min-height: 100vh; }
