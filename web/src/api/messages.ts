@@ -26,6 +26,7 @@ export const ERROR_MESSAGES: Record<ErrorCode | 'NETWORK' | 'INTERNAL_ERROR', Me
   CATALOG_APP_NOT_FOUND: fixed('This app is no longer in the catalog.'),
   PORT_IN_USE: (e) =>
     `Port ${String(e.details.port)} is already used by another program on the server. Pick another port in Advanced, or see the app's guide.`,
+  NOT_INSTALLED: fixed("This app didn't finish installing. Remove it and install it again."),
   JSON_REQUIRED: fixed('Something went wrong sending the request. Reload the page and try again.'),
   NETWORK: fixed("Can't reach EasyHost. Check that the server is on."),
   INTERNAL_ERROR: fixed('Something went wrong on the server. Try again in a moment.'),
