@@ -44,6 +44,7 @@ async function main(): Promise<void> {
   const catalogDir = path.resolve(__dirname, '..', 'catalog');
   const catalog = loadCatalog(catalogDir);
   const dataStore = new AppDataStore(config.dataDir);
+  await dataStore.lockAppsRoot();
   const ports = new PortChecker(config.containerBindAddress);
   const appService = new AppService(prisma, dockerService, dataStore);
   const recovered = await appService.recoverInterruptedInstalls();

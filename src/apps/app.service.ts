@@ -80,6 +80,7 @@ export class AppService implements IAppService {
   ) {}
 
   private readonly inflight = new Set<Promise<void>>();
+  private readonly installing = new Set<string>();
   /** Apps removed with their data while still installing: the install may recreate the folder. */
   private readonly removedWithData = new Set<string>();
 
@@ -109,8 +110,12 @@ export class AppService implements IAppService {
       throw err;
     }
 
+    this.installing.add(app.id);
     const job = this.install(app.id, input)
-      .then(() => this.dropDataOfRemovedApp(app.id))
+      .then(() => {
+        this.installing.delete(app.id);
+        return this.dropDataOfRemovedApp(app.id);
+      })
       .finally(() => this.inflight.delete(job));
     this.inflight.add(job);
     return app;
@@ -211,16 +216,21 @@ export class AppService implements IAppService {
     if (app.containerId) {
       await this.docker.remove(app.containerId, { force: true });
     }
-    await this.prisma.app.delete({ where: { id } });
-    const dataPath = this.dataStore.appDir(id);
-    if (deleteData && app.status === 'PENDING') {
-      this.removedWithData.add(id);
+    const deleted = await this.prisma.app.delete({ where: { id } });
+    // An install may have saved its container between the read and the delete.
+    if (deleted.containerId && deleted.containerId !== app.containerId) {
+      await this.docker.remove(deleted.containerId, { force: true });
     }
+    const dataPath = this.dataStore.appDir(id);
     if (!deleteData) {
       return { dataPath, dataDeleted: false };
     }
-    const { deleted } = await this.dataStore.remove(id);
-    return { dataPath, dataDeleted: deleted };
+    // Still installing: the install may recreate the folder, so it drops it again when done.
+    if (this.installing.has(id)) {
+      this.removedWithData.add(id);
+    }
+    const { deleted: dataDeleted } = await this.dataStore.remove(id);
+    return { dataPath, dataDeleted };
   }
 
   async logs(id: string, options: LogsInput): Promise<string> {

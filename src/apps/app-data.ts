@@ -63,14 +63,24 @@ export class AppDataStore {
   }
 
   /**
-   * Only EasyHost's own user may enter DATA_DIR/apps. Docker resolves bind
+   * Only EasyHost's own user may enter DATA_DIR/apps (called at startup and
+   * before each install). Docker resolves bind
    * mounts as its daemon user, so containers still reach their folders, but
    * other local accounts can never reach a folder opened by `handOver`.
    * chmod is explicit because mkdir's mode is narrowed by the umask only.
    */
-  private async lockAppsRoot(): Promise<void> {
+  async lockAppsRoot(): Promise<void> {
     await fs.promises.mkdir(this.appsRoot, { recursive: true, mode: 0o700 });
-    await fs.promises.chmod(this.appsRoot, 0o700);
+    try {
+      await fs.promises.chmod(this.appsRoot, 0o700);
+    } catch (err) {
+      // Owned by another user (e.g. created by an earlier run as root): keep
+      // installing rather than fail every app, but say what to fix.
+      console.warn(
+        `Could not make ${this.appsRoot} private (${(err as NodeJS.ErrnoException).code}). ` +
+          'Make it owned by the user running EasyHost with mode 700.',
+      );
+    }
   }
 
   /**

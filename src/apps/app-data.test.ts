@@ -35,6 +35,19 @@ describe('AppDataStore', () => {
     expect(fs.statSync(path.join(dataDir, 'apps')).mode & 0o777).toBe(0o700);
   });
 
+  it('keeps installing when DATA_DIR/apps cannot be made private', async () => {
+    const dataDir = tempDataDir();
+    jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const chmod = jest
+      .spyOn(fs.promises, 'chmod')
+      .mockRejectedValueOnce(Object.assign(new Error('EPERM'), { code: 'EPERM' }));
+    try {
+      await expect(new AppDataStore(dataDir).ensure('perm1', [{ name: 'config', containerPath: '/config' }])).resolves.toHaveLength(1);
+    } finally {
+      chmod.mockRestore();
+    }
+  });
+
   it('deletes only the app folder', async () => {
     const dataDir = tempDataDir();
     const store = new AppDataStore(dataDir);
