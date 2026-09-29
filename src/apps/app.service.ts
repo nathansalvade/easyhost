@@ -8,6 +8,7 @@ import {
   PortInUseError,
 } from '../errors';
 import type { IDockerService } from '../docker/docker.service';
+import type { AppDataStore } from './app-data';
 import type { AppStatus, CreateAppInput, LogsInput } from './app.types';
 
 /** The only texts ever stored in `lastError`: raw Docker/Prisma text never reaches the UI. */
@@ -52,6 +53,11 @@ function conflictFromUniqueConstraintError(
   return new ConflictError(`App name "${input.name}" is already taken`, 'NAME_TAKEN');
 }
 
+export interface RemoveResult {
+  dataPath: string;
+  dataDeleted: boolean;
+}
+
 /**
  * The subset of `AppService` that the HTTP layer depends on. Extracted as an
  * interface so route tests can hand-roll a mock without a real database.
@@ -60,7 +66,7 @@ export interface IAppService {
   create(input: CreateAppInput): Promise<App>;
   start(id: string): Promise<App>;
   stop(id: string): Promise<App>;
-  remove(id: string): Promise<void>;
+  remove(id: string, options?: { deleteData?: boolean }): Promise<RemoveResult>;
   logs(id: string, options: LogsInput): Promise<string>;
   list(): Promise<App[]>;
   get(id: string): Promise<App>;
@@ -70,6 +76,7 @@ export class AppService implements IAppService {
   constructor(
     private readonly prisma: PrismaClient,
     private readonly docker: IDockerService,
+    private readonly dataStore: AppDataStore,
   ) {}
 
   private readonly inflight = new Set<Promise<void>>();
@@ -156,12 +163,8 @@ export class AppService implements IAppService {
     }
   }
 
-  /** Task 13 replaces this with real data folders. */
-  protected async mountsFor(
-    _id: string,
-    _input: CreateAppInput,
-  ): Promise<Array<{ hostPath: string; containerPath: string }>> {
-    return [];
+  private mountsFor(id: string, input: CreateAppInput): Promise<Array<{ hostPath: string; containerPath: string }>> {
+    return this.dataStore.ensure(id, input.volumes ?? [], input.dataOwner);
   }
 
   async start(id: string): Promise<App> {
@@ -192,12 +195,19 @@ export class AppService implements IAppService {
     return this.prisma.app.update({ where: { id }, data: { status: 'STOPPED', lastError: null } });
   }
 
-  async remove(id: string): Promise<void> {
+  /** Data is kept unless `deleteData` is set; a failed deletion still removes the app. */
+  async remove(id: string, { deleteData = false }: { deleteData?: boolean } = {}): Promise<RemoveResult> {
     const app = await this.getOrThrow(id);
     if (app.containerId) {
       await this.docker.remove(app.containerId, { force: true });
     }
     await this.prisma.app.delete({ where: { id } });
+    const dataPath = this.dataStore.appDir(id);
+    if (!deleteData) {
+      return { dataPath, dataDeleted: false };
+    }
+    const { deleted } = await this.dataStore.remove(id);
+    return { dataPath, dataDeleted: deleted };
   }
 
   async logs(id: string, options: LogsInput): Promise<string> {

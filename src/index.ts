@@ -3,6 +3,7 @@ import { loadConfig } from './config';
 import { getPrismaClient } from './db/client';
 import { DockerService } from './docker/docker.service';
 import type { DockerodeClient } from './docker/docker.types';
+import { AppDataStore } from './apps/app-data';
 import { AppService } from './apps/app.service';
 import { AuthService } from './auth/auth.service';
 import { createServer } from './http/server';
@@ -35,7 +36,7 @@ function main(): void {
     bindAddress: config.containerBindAddress,
   });
   const prisma = getPrismaClient();
-  const appService = new AppService(prisma, dockerService);
+  const appService = new AppService(prisma, dockerService, new AppDataStore(config.dataDir));
 
   const authService = new AuthService(prisma);
   const app = createServer({

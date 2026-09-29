@@ -22,6 +22,10 @@ describe('shipped catalog', () => {
     expect(new Set(ports).size).toBe(ports.length);
   });
 
+  it('hands File Browser its data folders, since the image runs as user 1000', () => {
+    expect(catalog.get('filebrowser')!.dataOwner).toEqual({ uid: 1000, gid: 1000 });
+  });
+
   it('configures Pi-hole as DNS-only with port 53, a generated password and OS guides', () => {
     const pihole = catalog.get('pihole')!;
     expect(pihole.fixedPorts).toEqual([

@@ -21,6 +21,10 @@
       "containerPath": "/config"
     }
   ],
+  "dataOwner": {
+    "uid": 1000,
+    "gid": 1000
+  },
   "guide": {
     "afterInstall": [
       {

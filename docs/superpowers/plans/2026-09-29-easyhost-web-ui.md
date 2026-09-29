@@ -3434,6 +3434,7 @@ export class InstallPlanner implements IInstallPlanner {
       catalogId: entry.id,
       volumes: entry.volumes,
       fixedPorts: entry.fixedPorts,
+      dataOwner: entry.dataOwner,
       secrets,
     };
   }
