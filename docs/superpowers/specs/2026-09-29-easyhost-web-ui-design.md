@@ -75,7 +75,7 @@ manages it from a laptop or phone on the same home network.
 | Variable | Default | Purpose |
 |---|---|---|
 | `HOST` | `0.0.0.0` | Address the UI/API listens on; `127.0.0.1` restricts it to the server |
-| `TRUST_PROXY` | `false` | Set when behind an HTTPS reverse proxy; enables `Secure` cookies and takes client IPs from `X-Forwarded-For`, but only when the connection comes from this machine (the proxy must run on the same host; a forged header from elsewhere cannot dodge the rate limit) |
+| `TRUST_PROXY` | `false` | Set when behind an HTTPS reverse proxy; enables `Secure` cookies and takes client IPs from `X-Forwarded-For`, but only when the connection comes from this machine (the proxy must run on the same host, outside Docker or with host networking; a proxy in a bridged container or on another machine is not trusted, so its users share one rate limit; a forged header from elsewhere cannot dodge the limit) |
 | `DATA_DIR` | `./data` | Where app data folders are created |
 
 `CONTAINER_BIND_ADDRESS` from Step 1 is unchanged (default `0.0.0.0`).
