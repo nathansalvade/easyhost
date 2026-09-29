@@ -119,6 +119,7 @@ describe('DockerService', () => {
           ExposedPorts: { '80/tcp': {} },
           HostConfig: {
             PortBindings: { '80/tcp': [{ HostPort: '8080', HostIp: '0.0.0.0' }] },
+            Mounts: [],
           },
         }),
       );
@@ -143,6 +144,7 @@ describe('DockerService', () => {
         expect.objectContaining({
           HostConfig: {
             PortBindings: { '80/tcp': [{ HostPort: '8080', HostIp: '127.0.0.1' }] },
+            Mounts: [],
           },
         }),
       );
@@ -233,6 +235,86 @@ describe('DockerService', () => {
           containerPort: 80,
         }),
       ).rejects.toMatchObject({ containerId: 'abc123' });
+    });
+  });
+
+  describe('createAndStart with mounts and fixed ports', () => {
+    it('passes bind mounts through the Mounts API, keeping spaces and accents intact', async () => {
+      const container = makeContainer();
+      const docker = makeDocker({ createContainer: jest.fn().mockResolvedValue(container) });
+      const service = new DockerService(docker);
+      await service.createAndStart({
+        name: 'jf',
+        image: 'jellyfin/jellyfin:12.1',
+        hostPort: 8096,
+        containerPort: 8096,
+        mounts: [{ hostPath: 'C:\\Users\\Raoul Salvadé\\data\\apps\\abc\\config', containerPath: '/config' }],
+      });
+      expect(docker.createContainer).toHaveBeenCalledWith(
+        expect.objectContaining({
+          HostConfig: expect.objectContaining({
+            Mounts: [{ Type: 'bind', Source: 'C:\\Users\\Raoul Salvadé\\data\\apps\\abc\\config', Target: '/config' }],
+          }),
+        }),
+      );
+      expect(container.start).toHaveBeenCalled();
+    });
+
+    it('publishes fixed TCP and UDP ports on the bind address', async () => {
+      const docker = makeDocker();
+      const service = new DockerService(docker, { bindAddress: '0.0.0.0' });
+      await service.createAndStart({
+        name: 'pihole',
+        image: 'pihole/pihole:2026.09.0',
+        hostPort: 8082,
+        containerPort: 80,
+        fixedPorts: [
+          { containerPort: 53, hostPort: 53, protocol: 'tcp' },
+          { containerPort: 53, hostPort: 53, protocol: 'udp' },
+        ],
+      });
+      const options = (docker.createContainer as jest.Mock).mock.calls[0][0];
+      expect(options.ExposedPorts).toEqual({ '80/tcp': {}, '53/tcp': {}, '53/udp': {} });
+      expect(options.HostConfig.PortBindings).toEqual({
+        '80/tcp': [{ HostPort: '8082', HostIp: '0.0.0.0' }],
+        '53/tcp': [{ HostPort: '53', HostIp: '0.0.0.0' }],
+        '53/udp': [{ HostPort: '53', HostIp: '0.0.0.0' }],
+      });
+    });
+
+    it.each([
+      ['driver failed programming external connectivity on endpoint x: Bind for 0.0.0.0:53 failed: port is already allocated', 53, 'tcp'],
+      ['Error starting userland proxy: listen udp4 0.0.0.0:53: bind: address already in use', 53, 'udp'],
+      ['Error starting userland proxy: listen tcp4 0.0.0.0:8096: bind: address already in use', 8096, 'tcp'],
+      ['Error starting userland proxy: listen tcp6 [::]:8443: bind: address already in use', 8443, 'tcp'],
+      // Docker Desktop on Windows / macOS
+      [
+        'Ports are not available: exposing port UDP 0.0.0.0:53 -> 0.0.0.0:0: listen udp 0.0.0.0:53: bind: Only one usage of each socket address (protocol/network address/port) is normally permitted.',
+        53,
+        'udp',
+      ],
+      ['Ports are not available: exposing port TCP 0.0.0.0:8080 -> 0.0.0.0:0: listen tcp 0.0.0.0:8080: bind: address already in use', 8080, 'tcp'],
+    ])('maps "%s" to PortInUseError(%d, %s) and still cleans up', async (message, port, protocol) => {
+      const container = makeContainer({ start: jest.fn().mockRejectedValue(daemonError(message, { statusCode: 500 })) });
+      const docker = makeDocker({ createContainer: jest.fn().mockResolvedValue(container) });
+      const service = new DockerService(docker);
+      await expect(
+        service.createAndStart({ name: 'x', image: 'x:1', hostPort: 8096, containerPort: 8096 }),
+      ).rejects.toMatchObject({ code: 'PORT_IN_USE', details: { port, protocol } });
+      expect(container.remove).toHaveBeenCalledWith({ force: true });
+    });
+
+    it('keeps the container id on a port conflict when cleanup also fails', async () => {
+      const container = makeContainer({
+        id: 'abc123',
+        start: jest.fn().mockRejectedValue(daemonError('Bind for 0.0.0.0:53 failed: port is already allocated', {})),
+        remove: jest.fn().mockRejectedValue(daemonError('remove boom', { statusCode: 500 })),
+      });
+      const docker = makeDocker({ createContainer: jest.fn().mockResolvedValue(container) });
+      const service = new DockerService(docker);
+      await expect(
+        service.createAndStart({ name: 'x', image: 'x:1', hostPort: 8096, containerPort: 8096 }),
+      ).rejects.toMatchObject({ code: 'PORT_IN_USE', containerId: 'abc123' });
     });
   });
 
