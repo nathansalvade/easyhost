@@ -118,14 +118,17 @@ export class DockerService implements IDockerService {
     this.bindAddress = bindAddress;
   }
 
+  /**
+   * Docker's own text stays server-side: it is kept as `cause` (logged by the
+   * error middleware), never in the message a client receives.
+   */
   private translateError(err: unknown): DockerUnavailableError | DockerOperationError {
-    if (isDaemonError(err)) {
-      if (err.code && CONNECTION_ERROR_CODES.has(err.code)) {
-        return new DockerUnavailableError(err.message);
-      }
-      return new DockerOperationError(err.message);
-    }
-    return new DockerOperationError('Unknown docker error');
+    const translated =
+      isDaemonError(err) && err.code && CONNECTION_ERROR_CODES.has(err.code)
+        ? new DockerUnavailableError()
+        : new DockerOperationError();
+    translated.cause = err;
+    return translated;
   }
 
   async pullImage(image: string): Promise<void> {

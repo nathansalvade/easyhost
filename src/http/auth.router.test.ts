@@ -8,7 +8,13 @@ import type { IAppService } from '../apps/app.service';
 import type { IDockerService } from '../docker/docker.service';
 
 function build(
-  options: { authenticated?: boolean; secureCookies?: boolean; trustProxy?: boolean; loginLimiter?: RateLimiter } = {},
+  options: {
+    authenticated?: boolean;
+    secureCookies?: boolean;
+    trustProxy?: boolean;
+    loginLimiter?: RateLimiter;
+    globalLoginLimiter?: RateLimiter;
+  } = {},
 ) {
   const authService = makeAuthServiceMock(options.authenticated ?? true);
   const appService = { list: jest.fn().mockResolvedValue([]) } as unknown as IAppService;
@@ -24,6 +30,7 @@ function build(
     ...makeSystemDeps(),
     loginLimiter,
     recoveryLimiter,
+    globalLoginLimiter: options.globalLoginLimiter,
     secureCookies: options.secureCookies ?? false,
     trustProxy: options.trustProxy ?? false,
   });
@@ -118,6 +125,37 @@ describe('auth routes', () => {
     expect(trusts('::1', 0)).toBe(true);
     expect(trusts('192.168.1.60', 0)).toBe(false);
     expect(trusts('10.0.0.7', 0)).toBe(false);
+  });
+
+  it('counts every address of one IPv6 /64 as the same client', async () => {
+    const { app, authService } = build({ authenticated: false, trustProxy: true });
+    authService.login.mockRejectedValue(new InvalidCredentialsError());
+    const attempt = (i: number) =>
+      request(app)
+        .post('/api/auth/login')
+        .set('X-Forwarded-For', `2001:db8:1:2::${i.toString(16)}`)
+        .send({ password: 'wrong wrong' });
+    for (let i = 1; i <= 5; i++) {
+      expect((await attempt(i)).status).toBe(401);
+    }
+    expect((await attempt(99)).status).toBe(429);
+  });
+
+  it('slows guessing spread over many addresses with a limit across all clients', async () => {
+    const { app, authService } = build({
+      authenticated: false,
+      trustProxy: true,
+      globalLoginLimiter: new RateLimiter({ freeAttempts: 3, baseDelayMs: 5_000, maxDelayMs: 5_000 }),
+    });
+    authService.login.mockRejectedValue(new InvalidCredentialsError());
+    const attempt = (i: number) =>
+      request(app).post('/api/auth/login').set('X-Forwarded-For', `198.51.100.${i}`).send({ password: 'wrong wrong' });
+    for (let i = 1; i <= 3; i++) {
+      expect((await attempt(i)).status).toBe(401);
+    }
+    const blocked = await attempt(50);
+    expect(blocked.status).toBe(429);
+    expect(blocked.body.error.retryAfterSeconds).toBeLessThanOrEqual(5);
   });
 
   it('counts recovery attempts separately from logins', async () => {

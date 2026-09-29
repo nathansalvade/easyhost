@@ -35,6 +35,7 @@ export interface ServerDeps {
   trustProxy?: boolean;
   loginLimiter?: RateLimiter;
   recoveryLimiter?: RateLimiter;
+  globalLoginLimiter?: RateLimiter;
 }
 
 export function createServer(deps: ServerDeps): Application {
@@ -70,6 +71,7 @@ export function createServer(deps: ServerDeps): Application {
       auth: deps.authService,
       loginLimiter: deps.loginLimiter ?? new RateLimiter(),
       recoveryLimiter: deps.recoveryLimiter ?? new RateLimiter(),
+      globalLoginLimiter: deps.globalLoginLimiter,
       secureCookies: deps.secureCookies ?? false,
     }),
   );

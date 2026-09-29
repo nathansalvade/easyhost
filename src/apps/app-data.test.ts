@@ -27,6 +27,14 @@ describe('AppDataStore', () => {
     expect(fs.statSync(mounts[1].hostPath).isDirectory()).toBe(true);
   });
 
+  // POSIX permissions: Windows has no equivalent mode bits.
+  (process.platform === 'win32' ? it.skip : it)('keeps DATA_DIR/apps private to EasyHost\'s own user', async () => {
+    const dataDir = tempDataDir();
+    fs.mkdirSync(path.join(dataDir, 'apps'), { mode: 0o755 });
+    await new AppDataStore(dataDir).ensure('priv1', [{ name: 'config', containerPath: '/config' }]);
+    expect(fs.statSync(path.join(dataDir, 'apps')).mode & 0o777).toBe(0o700);
+  });
+
   it('deletes only the app folder', async () => {
     const dataDir = tempDataDir();
     const store = new AppDataStore(dataDir);

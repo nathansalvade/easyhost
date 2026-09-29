@@ -1,3 +1,36 @@
+import { isIPv4, isIPv6 } from 'net';
+
+/**
+ * The key failures are counted under. An IPv6 client usually controls a whole
+ * /64 (it can pick a fresh address per request), so it counts as one client;
+ * IPv4-mapped addresses count as the IPv4 address.
+ */
+export function clientKey(ip: string | undefined): string {
+  if (!ip) return 'unknown';
+  const address = ip.split('%')[0];
+  const mapped = /^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/i.exec(address);
+  if (mapped) return mapped[1];
+  if (isIPv4(address) || !isIPv6(address)) return address;
+  const [head, tail = ''] = address.split('::');
+  const headGroups = head ? head.split(':') : [];
+  const tailGroups = address.includes('::') && tail ? tail.split(':') : [];
+  const groups = address.includes('::')
+    ? [...headGroups, ...Array(8 - headGroups.length - tailGroups.length).fill('0'), ...tailGroups]
+    : headGroups;
+  return `${groups
+    .slice(0, 4)
+    .map((g) => parseInt(g, 16).toString(16))
+    .join(':')}::/64`;
+}
+
+/**
+ * Across all clients: after 50 failures within an hour, at most one attempt
+ * every 5 seconds. It slows a distributed guesser to ~720 tries an hour but
+ * never locks the owner out for more than a few seconds.
+ */
+export const GLOBAL_LIMIT: RateLimiterOptions = { freeAttempts: 50, baseDelayMs: 5_000, maxDelayMs: 5_000, idleWindowMs: 3_600_000 };
+export const GLOBAL_KEY = 'all';
+
 interface Entry {
   failures: number;
   lastFailureAt: number;

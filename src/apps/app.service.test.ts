@@ -366,6 +366,16 @@ describe('AppService', () => {
       await expect(prisma.app.findUnique({ where: { id: app.id } })).resolves.toBeNull();
     });
 
+    it('does not leave a data folder behind when an app is removed with its data while installing', async () => {
+      const pull = deferred();
+      docker.pullImage.mockReturnValue(pull.promise);
+      const app = await service.create({ name: 'data-race', image: 'x:1', hostPort: 9805, containerPort: 80, volumes });
+      await expect(service.remove(app.id, { deleteData: true })).resolves.toMatchObject({ dataDeleted: true });
+      pull.resolve();
+      await service.settled();
+      expect(fs.existsSync(path.join(dataDir, 'apps', app.id))).toBe(false);
+    });
+
     it('hands the data folders to the image user given by the catalog', async () => {
       const chown = jest.fn().mockResolvedValue(undefined);
       const svc = new AppService(prisma, docker, new AppDataStore(dataDir, { chown, platform: 'linux' }));

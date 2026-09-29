@@ -80,6 +80,8 @@ export class AppService implements IAppService {
   ) {}
 
   private readonly inflight = new Set<Promise<void>>();
+  /** Apps removed with their data while still installing: the install may recreate the folder. */
+  private readonly removedWithData = new Set<string>();
 
   /** Resolves with the PENDING row at once; the install continues in the background. */
   async create(input: CreateAppInput): Promise<App> {
@@ -107,7 +109,9 @@ export class AppService implements IAppService {
       throw err;
     }
 
-    const job = this.install(app.id, input).finally(() => this.inflight.delete(job));
+    const job = this.install(app.id, input)
+      .then(() => this.dropDataOfRemovedApp(app.id))
+      .finally(() => this.inflight.delete(job));
     this.inflight.add(job);
     return app;
   }
@@ -124,6 +128,12 @@ export class AppService implements IAppService {
       data: { status: 'ERROR', lastError: INSTALL_MESSAGES.interrupted },
     });
     return count;
+  }
+
+  private async dropDataOfRemovedApp(id: string): Promise<void> {
+    if (this.removedWithData.delete(id)) {
+      await this.dataStore.remove(id);
+    }
   }
 
   /** Never throws: every outcome is written to the row. */
@@ -203,6 +213,9 @@ export class AppService implements IAppService {
     }
     await this.prisma.app.delete({ where: { id } });
     const dataPath = this.dataStore.appDir(id);
+    if (deleteData && app.status === 'PENDING') {
+      this.removedWithData.add(id);
+    }
     if (!deleteData) {
       return { dataPath, dataDeleted: false };
     }

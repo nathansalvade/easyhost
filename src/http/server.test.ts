@@ -445,4 +445,29 @@ describe('createServer', () => {
       expect(appService.logs).not.toHaveBeenCalled();
     });
   });
+
+  describe('malformed request bodies', () => {
+    it('answers 400 for invalid JSON and never logs the body (it may hold a password)', async () => {
+      const log = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+      const { app } = build();
+      const res = await request(app)
+        .post('/api/auth/login')
+        .set('Content-Type', 'application/json')
+        .send('{"password":"hunter2-secret');
+      expect(res.status).toBe(400);
+      expect(res.body.error.code).toBe('VALIDATION_FAILED');
+      expect(JSON.stringify(log.mock.calls)).not.toContain('hunter2-secret');
+      log.mockRestore();
+    });
+
+    it('answers 413 for an oversized body', async () => {
+      const { app } = build();
+      const res = await request(app)
+        .post('/api/auth/login')
+        .set('Content-Type', 'application/json')
+        .send(JSON.stringify({ password: 'x'.repeat(200_000) }));
+      expect(res.status).toBe(413);
+    });
+  });
 });
+

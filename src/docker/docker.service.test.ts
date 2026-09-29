@@ -213,7 +213,19 @@ describe('DockerService', () => {
           hostPort: 8080,
           containerPort: 80,
         }),
-      ).rejects.toMatchObject({ message: expect.stringContaining('start boom') });
+      ).rejects.toMatchObject({ cause: expect.objectContaining({ message: 'start boom' }) });
+    });
+
+    it('never puts Docker\'s own text in the error message a client sees', async () => {
+      const container = makeContainer({
+        start: jest.fn().mockRejectedValue(daemonError('OCI runtime create failed: /var/lib/docker/secret-path', { statusCode: 500 })),
+      });
+      const service = new DockerService(makeDocker({ createContainer: jest.fn().mockResolvedValue(container) }));
+      const err = await service
+        .createAndStart({ name: 'x', image: 'x:1', hostPort: 8080, containerPort: 80 })
+        .catch((e: Error) => e);
+      expect(err).toBeInstanceOf(DockerOperationError);
+      expect((err as Error).message).not.toContain('secret-path');
     });
 
     it('carries the container id on the error when start and the cleanup removal both fail', async () => {
