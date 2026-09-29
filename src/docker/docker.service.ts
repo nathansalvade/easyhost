@@ -84,8 +84,8 @@ export interface DockerServiceOptions {
   maxTail?: number;
   /**
    * Host address that published container ports are bound to. Defaults to
-   * loopback so deployed apps are not reachable from the network unless an
-   * operator explicitly opts in (see `CONTAINER_BIND_ADDRESS` in config.ts).
+   * all interfaces so apps open from other home devices at server-IP:port
+   * (see `CONTAINER_BIND_ADDRESS` in config.ts).
    */
   bindAddress?: string;
 }

@@ -1,3 +1,4 @@
+import * as path from 'path';
 import { z } from 'zod';
 
 const configSchema = z
@@ -12,6 +13,9 @@ const configSchema = z
     // reachable from the home network (e.g. http://<server-LAN-IP>:<hostPort>);
     // set to 127.0.0.1 to restrict them to this machine only.
     CONTAINER_BIND_ADDRESS: z.string().ip().default('0.0.0.0'),
+    HOST: z.string().ip().default('0.0.0.0'),
+    TRUST_PROXY: z.enum(['true', 'false']).default('false'),
+    DATA_DIR: z.string().min(1).default('./data'),
   })
   .refine((val) => Boolean(val.DOCKER_SOCKET_PATH) || Boolean(val.DOCKER_HOST), {
     message: 'Either DOCKER_SOCKET_PATH or DOCKER_HOST must be set',
@@ -25,6 +29,9 @@ export interface Config {
   dockerHost?: string;
   logTailMax: number;
   containerBindAddress: string;
+  host: string;
+  trustProxy: boolean;
+  dataDir: string;
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
@@ -35,6 +42,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     DOCKER_HOST: env.DOCKER_HOST,
     LOG_TAIL_MAX: env.LOG_TAIL_MAX,
     CONTAINER_BIND_ADDRESS: env.CONTAINER_BIND_ADDRESS,
+    HOST: env.HOST,
+    TRUST_PROXY: env.TRUST_PROXY,
+    DATA_DIR: env.DATA_DIR,
   });
 
   return {
@@ -44,5 +54,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     dockerHost: parsed.DOCKER_HOST,
     logTailMax: parsed.LOG_TAIL_MAX,
     containerBindAddress: parsed.CONTAINER_BIND_ADDRESS,
+    host: parsed.HOST,
+    trustProxy: parsed.TRUST_PROXY === 'true',
+    // Docker bind mounts need absolute host paths.
+    dataDir: path.resolve(parsed.DATA_DIR),
   };
 }
