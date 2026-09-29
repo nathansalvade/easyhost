@@ -270,6 +270,11 @@ and multi-container apps such as Immich.
   `lastError String?`.
 - Each volume is bind-mounted from `DATA_DIR/apps/<app id>/<volume name>`.
   The app id, not the name, is used so folder names are always safe.
+- A catalog entry may set `dataOwner: { uid, gid }` when its image runs as a
+  fixed non-root user (File Browser: 1000:1000). On Linux its folders are
+  handed to that user; if EasyHost may not change the owner, only those
+  folders are made writable for all users instead. Docker Desktop (Windows,
+  macOS) needs neither.
 - Custom-image apps have no volumes unless added in the Advanced form
   (container paths only; host paths are always EasyHost-managed).
 - `DELETE /api/apps/:id` keeps the data folder. `?deleteData=true` also

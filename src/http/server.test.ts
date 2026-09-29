@@ -322,7 +322,7 @@ describe('createServer', () => {
   describe('DELETE /api/apps/:id', () => {
     it('removes the app and returns 204', async () => {
       const appService = makeAppServiceMock();
-      appService.remove.mockResolvedValue(undefined);
+      appService.remove.mockResolvedValue({ dataPath: '/data/apps/app-1', dataDeleted: false });
       const app = createServer({ appService, dockerService: makeDockerServiceMock(), authService: makeAuthServiceMock() });
 
       const res = await request(app).delete('/api/apps/app-1').set('Cookie', AUTH_COOKIE);
