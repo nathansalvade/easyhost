@@ -26,10 +26,23 @@ jobs:
         run: npx prisma generate
 
       - name: Typecheck
-        run: npx tsc --noEmit
+        run: npm run typecheck
 
       - name: Lint
-        run: npx eslint .
+        run: npm run lint
 
       - name: Test
-        run: npx jest --coverage
+        run: npx jest --coverage && npm run test:web
+
+      - name: Build
+        run: npm run build
+
+      # Real Chromium against the built server (no Docker daemon needed).
+      # Once is enough: the browser flows do not depend on the Node version.
+      - name: Install Chromium for end-to-end tests
+        if: matrix.node-version == 22
+        run: npx playwright install --with-deps chromium
+
+      - name: End-to-end tests
+        if: matrix.node-version == 22
+        run: npm run test:e2e
