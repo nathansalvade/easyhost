@@ -23,7 +23,13 @@ export interface ServerDeps {
 export function createServer(deps: ServerDeps): Application {
   const app = express();
   if (deps.trustProxy) {
-    app.set('trust proxy', true);
+    // Only a proxy on this machine may set the client address. `true` would
+    // take the client-controlled left-most X-Forwarded-For entry, and a hop
+    // count would trust anyone on the LAN connecting to HOST directly; either
+    // lets an attacker pick a fresh IP per request and bypass the login rate
+    // limiter. A proxy elsewhere is not trusted, so its clients share one
+    // limit (a lockout risk, never a bypass).
+    app.set('trust proxy', 'loopback');
   }
   app.use(express.json());
   app.use(cookieParser());

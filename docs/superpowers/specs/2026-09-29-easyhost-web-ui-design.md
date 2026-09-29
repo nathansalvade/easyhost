@@ -75,7 +75,7 @@ manages it from a laptop or phone on the same home network.
 | Variable | Default | Purpose |
 |---|---|---|
 | `HOST` | `0.0.0.0` | Address the UI/API listens on; `127.0.0.1` restricts it to the server |
-| `TRUST_PROXY` | `false` | Set when behind an HTTPS reverse proxy; enables `Secure` cookies and correct client IPs |
+| `TRUST_PROXY` | `false` | Set when behind an HTTPS reverse proxy; enables `Secure` cookies and takes client IPs from `X-Forwarded-For`, but only when the connection comes from this machine (the proxy must run on the same host; a forged header from elsewhere cannot dodge the rate limit) |
 | `DATA_DIR` | `./data` | Where app data folders are created |
 
 `CONTAINER_BIND_ADDRESS` from Step 1 is unchanged (default `0.0.0.0`).
@@ -106,8 +106,11 @@ manages it from a laptop or phone on the same home network.
   (no `0/O`, `1/I/L`), shown as four groups of five (`K7QX2-...`), about
   100 bits of entropy. It is stored only as a `scrypt` hash.
 - Session tokens are 32 random bytes, sent as an `HttpOnly`, `SameSite=Strict`
-  cookie (`Secure` when `TRUST_PROXY` is set). Only their SHA-256 is stored.
-  Sessions last 30 days and are extended on use.
+  cookie (`Secure` when `TRUST_PROXY` is set) scoped to `Path=/api`, so apps
+  published on other ports of the same host do not receive it on their pages.
+  Only their SHA-256 is stored. Sessions last 30 days and are extended on use.
+- `POST /api/auth/setup` checks whether the account exists before hashing, so
+  the route, public forever, cannot be used to make the server run `scrypt`.
 
 ### Endpoints
 
