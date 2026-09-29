@@ -45,10 +45,9 @@ export function hashRecoveryCode(normalizedCode: string): string {
   return RECOVERY_HASH_PREFIX + createHash('sha256').update(normalizedCode).digest('hex');
 }
 
-export async function verifyRecoveryCode(normalizedCode: string, stored: string): Promise<boolean> {
+export function verifyRecoveryCode(normalizedCode: string, stored: string): boolean {
   if (!stored.startsWith(RECOVERY_HASH_PREFIX)) {
-    // Stored by an earlier build with scrypt; replaced by the next new code.
-    return verifySecret(normalizedCode, stored);
+    return false;
   }
   const expected = Buffer.from(stored.slice(RECOVERY_HASH_PREFIX.length), 'hex');
   const actual = createHash('sha256').update(normalizedCode).digest();
