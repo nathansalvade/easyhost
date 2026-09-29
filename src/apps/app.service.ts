@@ -219,7 +219,10 @@ export class AppService implements IAppService {
     const deleted = await this.prisma.app.delete({ where: { id } });
     // An install may have saved its container between the read and the delete.
     if (deleted.containerId && deleted.containerId !== app.containerId) {
-      await this.docker.remove(deleted.containerId, { force: true });
+      await this.docker.remove(deleted.containerId, { force: true }).catch((err) => {
+        // The app is gone already; leave a trace so the container can be removed by hand.
+        console.error(`Could not remove container ${deleted.containerId} of removed app ${id}`, err);
+      });
     }
     const dataPath = this.dataStore.appDir(id);
     if (!deleteData) {

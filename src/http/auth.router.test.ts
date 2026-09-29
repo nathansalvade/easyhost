@@ -1,7 +1,7 @@
 import request from 'supertest';
 import { createServer } from './server';
 import { RateLimiter } from '../auth/rate-limiter';
-import { InvalidCredentialsError } from '../errors';
+import { InvalidCredentialsError, InvalidRecoveryCodeError } from '../errors';
 import { AUTH_COOKIE, makeAuthServiceMock } from '../../test/helpers/auth';
 import { makeSystemDeps, makeViewContext } from '../../test/helpers/views';
 import type { IAppService } from '../apps/app.service';
@@ -187,6 +187,60 @@ describe('auth routes', () => {
       .set('Cookie', deviceCookie.split(';')[0])
       .send({ password: 'right password' });
     expect(owner.status).toBe(204);
+  });
+
+  it('keeps recovery open to a new browser while an attack saturates the shared login limits', async () => {
+    const { app, authService } = build({
+      authenticated: false,
+      trustProxy: true,
+      globalLoginLimiter: new RateLimiter({ freeAttempts: 3, baseDelayMs: 5_000, maxDelayMs: 5_000 }),
+    });
+    authService.login.mockRejectedValue(new InvalidCredentialsError());
+    for (let i = 1; i <= 5; i++) {
+      await request(app).post('/api/auth/login').set('X-Forwarded-For', `2001:db8:9::${i}`).send({ password: 'guess guess' });
+    }
+    // The attacker floods recovery from many addresses too.
+    authService.recover.mockRejectedValue(new InvalidRecoveryCodeError());
+    for (let i = 1; i <= 60; i++) {
+      await request(app)
+        .post('/api/auth/recover')
+        .set('X-Forwarded-For', `2001:db8:${i.toString(16)}::1`)
+        .send({ recoveryCode: 'guess', newPassword: 'long enough pw' });
+    }
+    authService.recover.mockResolvedValue({ recoveryCode: 'NEW', sessionToken: 'tok' });
+    const res = await request(app)
+      .post('/api/auth/recover')
+      .set('X-Forwarded-For', '192.168.1.20')
+      .send({ recoveryCode: 'AAAAA-BBBBB-CCCCC-DDDDD', newPassword: 'long enough pw' });
+    expect(res.status).toBe(200);
+    expect((res.headers['set-cookie'] as unknown as string[]).some((c) => c.startsWith('easyhost_device='))).toBe(true);
+  });
+
+  it('revokes other trusted devices after a recovery, and reuses a still-valid device token on login', async () => {
+    const { app, authService } = build({
+      authenticated: false,
+      trustProxy: true,
+      globalLoginLimiter: new RateLimiter({ freeAttempts: 1, baseDelayMs: 5_000, maxDelayMs: 5_000 }),
+    });
+    const deviceOf = (res: request.Response) =>
+      (res.headers['set-cookie'] as unknown as string[] | undefined)?.find((c) => c.startsWith('easyhost_device='))?.split(';')[0];
+    authService.login.mockResolvedValue({ sessionToken: 'tok' });
+    const oldDevice = deviceOf(await request(app).post('/api/auth/login').send({ password: 'right password' }))!;
+    const again = await request(app).post('/api/auth/login').set('Cookie', oldDevice).send({ password: 'right password' });
+    expect(deviceOf(again)).toBeUndefined();
+
+    authService.recover.mockResolvedValue({ recoveryCode: 'NEW', sessionToken: 'tok2' });
+    await request(app).post('/api/auth/recover').send({ recoveryCode: 'x', newPassword: 'long enough pw' });
+
+    // Saturate the global limit, then the old device must be treated as a stranger.
+    authService.login.mockRejectedValue(new InvalidCredentialsError());
+    await request(app).post('/api/auth/login').set('X-Forwarded-For', '198.51.100.1').send({ password: 'guess guess' });
+    const res = await request(app)
+      .post('/api/auth/login')
+      .set('X-Forwarded-For', '198.51.100.2')
+      .set('Cookie', oldDevice)
+      .send({ password: 'guess guess' });
+    expect(res.status).toBe(429);
   });
 
   it('counts recovery attempts separately from logins', async () => {

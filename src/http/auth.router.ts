@@ -18,9 +18,8 @@ export interface AuthRouterDeps {
   auth: IAuthService;
   loginLimiter: RateLimiter;
   recoveryLimiter: RateLimiter;
-  /** Failures from all clients together; defaults to GLOBAL_LIMIT. */
+  /** Failed logins from all clients together; defaults to GLOBAL_LIMIT. */
   globalLoginLimiter?: RateLimiter;
-  globalRecoveryLimiter?: RateLimiter;
   trustedDevices?: TrustedDevices;
   secureCookies: boolean;
 }
@@ -35,8 +34,8 @@ interface Limits {
   /** The exact address: 5 free failures, then 30 s doubling up to 15 min. */
   client: RateLimiter;
   /** The IPv6 /64 and all clients together: slow down only (PREFIX_LIMIT, GLOBAL_LIMIT). */
-  prefix: RateLimiter;
-  global: RateLimiter;
+  prefix?: RateLimiter;
+  global?: RateLimiter;
 }
 
 function parse<T>(schema: z.ZodType<T>, body: unknown): T {
@@ -52,17 +51,15 @@ export function createAuthRouter({
   loginLimiter,
   recoveryLimiter,
   globalLoginLimiter = new RateLimiter(GLOBAL_LIMIT),
-  globalRecoveryLimiter = new RateLimiter(GLOBAL_LIMIT),
   trustedDevices = new TrustedDevices(),
   secureCookies,
 }: AuthRouterDeps): Router {
   const router = Router();
   const loginLimits: Limits = { client: loginLimiter, prefix: new RateLimiter(PREFIX_LIMIT), global: globalLoginLimiter };
-  const recoveryLimits: Limits = {
-    client: recoveryLimiter,
-    prefix: new RateLimiter(PREFIX_LIMIT),
-    global: globalRecoveryLimiter,
-  };
+  // No shared limits for the recovery code: at ~99 bits it cannot be guessed
+  // anyway, and this keeps it the way back in for an owner whose browser is
+  // not trusted while an attacker saturates the shared login limits.
+  const recoveryLimits: Limits = { client: recoveryLimiter };
   const deviceCookieOptions: CookieOptions = {
     httpOnly: true,
     sameSite: 'strict',
@@ -70,7 +67,12 @@ export function createAuthRouter({
     path: '/api/auth',
     maxAge: DEVICE_TTL_MS,
   };
-  const trustDevice = (res: Response) => res.cookie(DEVICE_COOKIE, trustedDevices.issue(), deviceCookieOptions);
+  /** Marks this browser as known, keeping a still-valid token unless all devices were just revoked. */
+  const trustDevice = (req: Request, res: Response, { revokeOthers = false } = {}) => {
+    if (revokeOthers) trustedDevices.clear();
+    else if (trustedDevices.has(req.cookies?.[DEVICE_COOKIE])) return;
+    res.cookie(DEVICE_COOKIE, trustedDevices.issue(), deviceCookieOptions);
+  };
   const cookieOptions: CookieOptions = sessionCookieOptions(secureCookies);
   const setSession = (res: Response, token: string) => res.cookie(SESSION_COOKIE, token, cookieOptions);
   const tokenOf = (req: Request): string => req.cookies[SESSION_COOKIE];
@@ -85,9 +87,11 @@ export function createAuthRouter({
       const key = clientAddress(req.ip);
       const prefixKey = ipv6Prefix(key);
       // Shared keys, skipped by trusted devices so they can never lock the owner out.
-      const shared: Array<[RateLimiter, string]> = trustedDevices.has(req.cookies?.[DEVICE_COOKIE])
-        ? []
-        : [...(prefixKey ? [[prefix, prefixKey] as [RateLimiter, string]] : []), [global, GLOBAL_KEY]];
+      const shared: Array<[RateLimiter, string]> = [];
+      if (!trustedDevices.has(req.cookies?.[DEVICE_COOKIE])) {
+        if (prefix && prefixKey) shared.push([prefix, prefixKey]);
+        if (global) shared.push([global, GLOBAL_KEY]);
+      }
       for (const decision of [client.check(key), ...shared.map(([limiter, k]) => limiter.check(k))]) {
         if (!decision.allowed) {
           throw new TooManyAttemptsError(decision.retryAfterSeconds);
@@ -101,8 +105,8 @@ export function createAuthRouter({
       } catch (err) {
         if (err instanceof AppError && (err.code === 'INVALID_CREDENTIALS' || err.code === 'INVALID_RECOVERY_CODE')) {
           client.recordFailure(key);
-          if (prefixKey) prefix.recordFailure(prefixKey);
-          global.recordFailure(GLOBAL_KEY);
+          if (prefix && prefixKey) prefix.recordFailure(prefixKey);
+          global?.recordFailure(GLOBAL_KEY);
         }
         throw err;
       }
@@ -120,7 +124,7 @@ export function createAuthRouter({
     const { password } = parse(passwordBody, req.body);
     const { recoveryCode, sessionToken } = await auth.setup(password);
     setSession(res, sessionToken);
-    trustDevice(res);
+    trustDevice(req, res);
     res.status(201).json({ recoveryCode });
   }));
 
@@ -128,7 +132,7 @@ export function createAuthRouter({
     const { password } = parse(passwordBody, req.body);
     const { sessionToken } = await limited(loginLimits, req, () => auth.login(password));
     setSession(res, sessionToken);
-    trustDevice(res);
+    trustDevice(req, res);
     res.status(204).send();
   }));
 
@@ -136,7 +140,8 @@ export function createAuthRouter({
     const { recoveryCode, newPassword } = parse(recoverBody, req.body);
     const result = await limited(recoveryLimits, req, () => auth.recover(recoveryCode, newPassword));
     setSession(res, result.sessionToken);
-    trustDevice(res);
+    // A new password: devices that knew the old one are no longer trusted.
+    trustDevice(req, res, { revokeOthers: true });
     res.json({ recoveryCode: result.recoveryCode });
   }));
 
@@ -149,6 +154,7 @@ export function createAuthRouter({
   router.post('/password', asyncHandler(async (req, res) => {
     const { currentPassword, newPassword } = parse(changeBody, req.body);
     await limited(loginLimits, req, () => auth.changePassword(tokenOf(req), currentPassword, newPassword));
+    trustDevice(req, res, { revokeOthers: true });
     res.status(204).send();
   }));
 

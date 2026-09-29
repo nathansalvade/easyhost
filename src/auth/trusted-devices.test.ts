@@ -19,4 +19,11 @@ describe('TrustedDevices', () => {
     const third = devices.issue();
     expect([devices.has(first), devices.has(second), devices.has(third)]).toEqual([false, true, true]);
   });
+
+  it('forgets every device on clear', () => {
+    const devices = new TrustedDevices();
+    const token = devices.issue();
+    devices.clear();
+    expect(devices.has(token)).toBe(false);
+  });
 });
