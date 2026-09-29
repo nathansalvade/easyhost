@@ -1,0 +1,32 @@
+{
+  "id": "home-assistant",
+  "name": "Home Assistant",
+  "description": "Control lights, sensors and smart devices from one place, without the vendor's cloud.",
+  "category": "Smart home",
+  "icon": "icons/home-assistant.svg",
+  "image": "ghcr.io/home-assistant/home-assistant:2026.9.4",
+  "containerPort": 8123,
+  "defaultHostPort": 8123,
+  "volumes": [
+    {
+      "name": "config",
+      "containerPath": "/config"
+    }
+  ],
+  "guide": {
+    "afterInstall": [
+      {
+        "text": "Click Open. Home Assistant can take a few minutes the first time; refresh if the page does not load yet."
+      },
+      {
+        "text": "Create your Home Assistant account and set your home location."
+      },
+      {
+        "text": "Add devices under Settings, then Devices & services. Devices that are found automatically on the network may not appear; add them by their address instead."
+      },
+      {
+        "text": "Install the Home Assistant app on your phone and enter the address shown at the top of this page."
+      }
+    ]
+  }
+}

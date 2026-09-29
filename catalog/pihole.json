@@ -1,0 +1,198 @@
+{
+  "id": "pihole",
+  "name": "Pi-hole",
+  "description": "Block ads and trackers for every device in your home, including phones and TVs.",
+  "category": "Network",
+  "icon": "icons/pihole.svg",
+  "image": "pihole/pihole:2026.09.0",
+  "containerPort": 80,
+  "defaultHostPort": 8082,
+  "openPath": "/admin",
+  "env": {
+    "FTLCONF_dns_listeningMode": "ALL"
+  },
+  "volumes": [
+    {
+      "name": "config",
+      "containerPath": "/etc/pihole"
+    }
+  ],
+  "fixedPorts": [
+    {
+      "containerPort": 53,
+      "hostPort": 53,
+      "protocol": "tcp"
+    },
+    {
+      "containerPort": 53,
+      "hostPort": 53,
+      "protocol": "udp"
+    }
+  ],
+  "generatedSecrets": [
+    {
+      "name": "adminPassword",
+      "label": "Admin password",
+      "env": "FTLCONF_webserver_api_password"
+    }
+  ],
+  "guide": {
+    "afterInstall": [
+      {
+        "text": "Click Open and log in with the Admin password shown on this page."
+      },
+      {
+        "text": "Tell your devices to use Pi-hole, following the steps under \"On your devices\" below. Changing the router covers every device at once."
+      },
+      {
+        "text": "Check that it works: on the Pi-hole dashboard, Total queries starts growing as your devices browse."
+      }
+    ],
+    "server": {
+      "linux": {
+        "default": [
+          {
+            "text": "Pi-hole needs port 53, the standard port for DNS. Most Linux systems leave it free, so there is usually nothing to do."
+          },
+          {
+            "text": "If the install says port 53 is already used, open a terminal on the server and see which program holds it:",
+            "command": "sudo ss -lunp 'sport = :53'"
+          },
+          {
+            "text": "Stop or reconfigure that program, then install Pi-hole again."
+          }
+        ],
+        "ubuntu": [
+          {
+            "text": "Ubuntu runs a small built-in DNS helper (systemd-resolved) on port 53. Pi-hole needs that port, so turn the helper's listener off. Open a terminal on the server and run:",
+            "command": "sudo sed -r -i.orig 's/#?DNSStubListener=yes/DNSStubListener=no/g' /etc/systemd/resolved.conf"
+          },
+          {
+            "text": "Point the system's DNS settings at the real resolver file:",
+            "command": "sudo sh -c 'rm /etc/resolv.conf && ln -s /run/systemd/resolve/resolv.conf /etc/resolv.conf'"
+          },
+          {
+            "text": "Restart the helper so the change takes effect:",
+            "command": "sudo systemctl restart systemd-resolved"
+          },
+          {
+            "text": "Come back to EasyHost and install Pi-hole."
+          }
+        ],
+        "fedora": [
+          {
+            "text": "Fedora runs a small built-in DNS helper (systemd-resolved) on port 53. Pi-hole needs that port, so turn the helper's listener off. Open a terminal on the server and run:",
+            "command": "sudo sed -r -i.orig 's/#?DNSStubListener=yes/DNSStubListener=no/g' /etc/systemd/resolved.conf"
+          },
+          {
+            "text": "Point the system's DNS settings at the real resolver file:",
+            "command": "sudo sh -c 'rm /etc/resolv.conf && ln -s /run/systemd/resolve/resolv.conf /etc/resolv.conf'"
+          },
+          {
+            "text": "Restart the helper so the change takes effect:",
+            "command": "sudo systemctl restart systemd-resolved"
+          },
+          {
+            "text": "Come back to EasyHost and install Pi-hole."
+          }
+        ]
+      },
+      "windows": [
+        {
+          "text": "With Docker Desktop there is usually nothing to do on the server."
+        },
+        {
+          "text": "If the install says port 53 is already used, the Windows feature Internet Connection Sharing may hold it. Open the Start menu, type Services and open it."
+        },
+        {
+          "text": "Find Internet Connection Sharing (ICS), open it, click Stop and set Startup type to Disabled. Then install Pi-hole again."
+        },
+        {
+          "text": "If Windows asks whether Docker Desktop may accept connections, allow it on private networks."
+        }
+      ],
+      "macos": [
+        {
+          "text": "With Docker Desktop there is usually nothing to do on the server."
+        },
+        {
+          "text": "If macOS asks whether Docker may accept incoming connections, click Allow."
+        },
+        {
+          "text": "If the install says port 53 is already used, another DNS app is running on this Mac (for example a VPN or dnsmasq). Quit it and install Pi-hole again."
+        }
+      ]
+    },
+    "devices": {
+      "router": [
+        {
+          "text": "Open your router's settings page in a browser. The address is usually printed on a label on the router, often http://192.168.1.1 or http://192.168.0.1."
+        },
+        {
+          "text": "Find the DNS server setting for your home network. It is usually under LAN or DHCP settings, not under Internet or WAN."
+        },
+        {
+          "text": "Set the primary DNS server to {serverAddress}. Leave the secondary DNS empty, otherwise devices may skip Pi-hole."
+        },
+        {
+          "text": "Save, then turn Wi-Fi off and on again on your devices so they pick up the change."
+        }
+      ],
+      "windows": [
+        {
+          "text": "Open Settings, then Network & internet, then Wi-Fi (or Ethernet), and click your network."
+        },
+        {
+          "text": "Next to DNS server assignment click Edit, choose Manual and turn on IPv4."
+        },
+        {
+          "text": "Set Preferred DNS to {serverAddress} and click Save."
+        }
+      ],
+      "macos": [
+        {
+          "text": "Open System Settings, then Network, and select your Wi-Fi or Ethernet connection."
+        },
+        {
+          "text": "Click Details, then DNS. Click + and enter {serverAddress}."
+        },
+        {
+          "text": "Remove any other DNS servers in the list, then click OK."
+        }
+      ],
+      "linux": [
+        {
+          "text": "Open Settings, then Wi-Fi or Network, and click the gear next to your connection."
+        },
+        {
+          "text": "Open the IPv4 tab, turn off Automatic next to DNS and enter {serverAddress}."
+        },
+        {
+          "text": "Click Apply, then disconnect and reconnect. Other desktops have the same option in their network settings."
+        }
+      ],
+      "android": [
+        {
+          "text": "Android only lets you change DNS per Wi-Fi network together with a fixed IP address, which is fiddly. Changing the router instead is much easier."
+        },
+        {
+          "text": "If you still want to: open Settings, then Network & internet, then Internet, and tap the gear next to your Wi-Fi."
+        },
+        {
+          "text": "Tap Edit, open Advanced options, set IP settings to Static and enter {serverAddress} as DNS 1. Keep the IP address and gateway it suggests, then Save."
+        }
+      ],
+      "ios": [
+        {
+          "text": "Open Settings, then Wi-Fi, and tap the (i) next to your network."
+        },
+        {
+          "text": "Tap Configure DNS, choose Manual and delete the existing servers."
+        },
+        {
+          "text": "Tap Add Server, enter {serverAddress} and tap Save."
+        }
+      ]
+    }
+  }
+}
