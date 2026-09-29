@@ -14,6 +14,7 @@ export const ERROR_CODES = [
   'CATALOG_APP_NOT_FOUND',
   'PORT_IN_USE',
   'JSON_REQUIRED',
+  'NOT_INSTALLED',
 ] as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[number];
@@ -125,5 +126,12 @@ export class PortInUseError extends AppError {
 export class JsonRequiredError extends AppError {
   constructor() {
     super('Requests must be sent as JSON', 415, 'JSON_REQUIRED');
+  }
+}
+
+/** The app has no container: it is still installing, or its install failed before creating one. */
+export class NotInstalledError extends AppError {
+  constructor() {
+    super("This app isn't installed on the server", 409, 'NOT_INSTALLED');
   }
 }

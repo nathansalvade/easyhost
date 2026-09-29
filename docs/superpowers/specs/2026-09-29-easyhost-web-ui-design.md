@@ -374,6 +374,7 @@ New error codes, in addition to Step 1's:
 | `SETUP_ALREADY_DONE` | 409 | Setup called when an account exists |
 | `CATALOG_APP_NOT_FOUND` | 404 | Unknown `catalogId` |
 | `PORT_IN_USE` | 409 | Port taken by another program on the server |
+| `NOT_INSTALLED` | 409 | Start, stop or logs for an app that has no container (still installing, or its install failed) |
 
 A weak password is a `VALIDATION_FAILED`.
 

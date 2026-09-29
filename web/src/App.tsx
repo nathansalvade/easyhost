@@ -7,6 +7,7 @@ import { RecoverPage } from './pages/RecoverPage';
 import { HomePage } from './pages/HomePage';
 import { SettingsPage } from './pages/SettingsPage';
 import { Layout } from './components/Layout';
+import { AppDetailPage } from './pages/AppDetailPage';
 
 export function App() {
   const { status, newRecoveryCode, setNewRecoveryCode } = useAuth();
@@ -54,6 +55,7 @@ export function App() {
       />
       <Route element={<Layout />}>
         <Route path="/" element={<HomePage />} />
+        <Route path="/apps/:id" element={<AppDetailPage />} />
         <Route path="/settings" element={<SettingsPage />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />

@@ -5,6 +5,7 @@ import {
   ContainerMissingError,
   DockerUnavailableError,
   NotFoundError,
+  NotInstalledError,
   PortInUseError,
 } from '../errors';
 import type { IDockerService } from '../docker/docker.service';
@@ -185,7 +186,7 @@ export class AppService implements IAppService {
   async start(id: string): Promise<App> {
     const app = await this.getOrThrow(id);
     if (!app.containerId) {
-      throw new NotFoundError(`App ${id} has no associated container`);
+      throw new NotInstalledError();
     }
     try {
       await this.docker.start(app.containerId);
@@ -199,7 +200,7 @@ export class AppService implements IAppService {
   async stop(id: string): Promise<App> {
     const app = await this.getOrThrow(id);
     if (!app.containerId) {
-      throw new NotFoundError(`App ${id} has no associated container`);
+      throw new NotInstalledError();
     }
     try {
       await this.docker.stop(app.containerId);
@@ -239,7 +240,7 @@ export class AppService implements IAppService {
   async logs(id: string, options: LogsInput): Promise<string> {
     const app = await this.getOrThrow(id);
     if (!app.containerId) {
-      throw new NotFoundError(`App ${id} has no associated container`);
+      throw new NotInstalledError();
     }
     try {
       return await this.docker.logs(app.containerId, options);

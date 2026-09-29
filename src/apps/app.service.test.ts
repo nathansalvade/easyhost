@@ -9,6 +9,7 @@ import {
   DockerOperationError,
   DockerUnavailableError,
   NotFoundError,
+  NotInstalledError,
   PortInUseError,
 } from '../errors';
 import { createTempDb } from '../../test/helpers/temp-db';
@@ -420,7 +421,7 @@ describe('AppService', () => {
       expect(updated.status).toBe('RUNNING');
     });
 
-    it('throws NotFoundError and never calls docker when the app has no containerId', async () => {
+    it('throws NotInstalledError and never calls docker when the app has no containerId', async () => {
       const docker = makeDockerMock();
       docker.createAndStart.mockRejectedValue(new DockerOperationError('boom'));
       const service = new AppService(prisma, docker, dataStore);
@@ -430,7 +431,7 @@ describe('AppService', () => {
       expect(app.containerId).toBeNull();
       docker.start.mockClear();
 
-      await expect(service.start(app.id)).rejects.toBeInstanceOf(NotFoundError);
+      await expect(service.start(app.id)).rejects.toBeInstanceOf(NotInstalledError);
 
       expect(docker.start).not.toHaveBeenCalled();
       const unchanged = await prisma.app.findUniqueOrThrow({ where: { id: app.id } });
@@ -456,7 +457,7 @@ describe('AppService', () => {
       expect(updated.status).toBe('STOPPED');
     });
 
-    it('throws NotFoundError and never calls docker when the app has no containerId', async () => {
+    it('throws NotInstalledError and never calls docker when the app has no containerId', async () => {
       const docker = makeDockerMock();
       docker.createAndStart.mockRejectedValue(new DockerOperationError('boom'));
       const service = new AppService(prisma, docker, dataStore);
@@ -464,7 +465,7 @@ describe('AppService', () => {
       const app = await prisma.app.findUniqueOrThrow({ where: { name: 'no-container2' } });
       docker.stop.mockClear();
 
-      await expect(service.stop(app.id)).rejects.toBeInstanceOf(NotFoundError);
+      await expect(service.stop(app.id)).rejects.toBeInstanceOf(NotInstalledError);
 
       expect(docker.stop).not.toHaveBeenCalled();
       const unchanged = await prisma.app.findUniqueOrThrow({ where: { id: app.id } });
@@ -530,14 +531,14 @@ describe('AppService', () => {
       expect(logs).toBe('line1\nline2\n');
     });
 
-    it('throws NotFoundError when the app has no containerId', async () => {
+    it('throws NotInstalledError when the app has no containerId', async () => {
       const docker = makeDockerMock();
       docker.createAndStart.mockRejectedValue(new DockerOperationError('boom'));
       const service = new AppService(prisma, docker, dataStore);
       await createInstalled(service, { name: 'l2', image: 'nginx', hostPort: 6201, containerPort: 6201 });
       const app = await prisma.app.findUniqueOrThrow({ where: { name: 'l2' } });
 
-      await expect(service.logs(app.id, { tail: 50 })).rejects.toBeInstanceOf(NotFoundError);
+      await expect(service.logs(app.id, { tail: 50 })).rejects.toBeInstanceOf(NotInstalledError);
     });
   });
 
