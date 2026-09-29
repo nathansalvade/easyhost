@@ -2,7 +2,7 @@ import type { PrismaClient } from '@prisma/client';
 import { createTempDb } from '../../test/helpers/temp-db';
 import { Catalog, type CatalogEntry } from '../catalog/catalog';
 import type { IPortChecker, PortStatus } from '../ports/port-checker';
-import { InstallPlanner } from './install-planner';
+import { InstallPlanner, usedHostPorts } from './install-planner';
 
 const pihole: CatalogEntry = {
   id: 'pihole',
@@ -122,5 +122,16 @@ describe('InstallPlanner', () => {
     await expect(
       planner.plan({ name: 'custom', image: 'nginx:1.27', hostPort: 8088, env: { A: 'b' } }),
     ).resolves.toEqual({ name: 'custom', image: 'nginx:1.27', hostPort: 8088, containerPort: 8088, env: { A: 'b' }, volumes: [] });
+  });
+
+  it('usedHostPorts lists web ports and fixed ports of every app', async () => {
+    await prisma.app.create({ data: { name: 'web', image: 'x:1', hostPort: 8096, containerPort: 80, status: 'RUNNING' } });
+    await prisma.app.create({
+      data: {
+        name: 'dns', image: 'x:1', hostPort: 8082, containerPort: 80, status: 'RUNNING',
+        fixedPorts: JSON.stringify([{ containerPort: 53, hostPort: 53, protocol: 'udp' }]),
+      },
+    });
+    await expect(usedHostPorts(prisma)).resolves.toEqual(new Set([8096, 8082, 53]));
   });
 });

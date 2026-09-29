@@ -8,3 +8,13 @@ import type { ViewContext } from '../../src/apps/app.view';
 export function makeViewContext(catalog = new Catalog([])): ViewContext {
   return { catalog, dataStore: new AppDataStore(path.join(os.tmpdir(), 'easyhost-views-unused')) };
 }
+
+/** The server deps added for system, catalog and port routes, with harmless defaults. */
+export function makeSystemDeps() {
+  return {
+    system: () => ({ os: 'linux' as const, distros: [], version: '0.0.0' }),
+    ports: { check: jest.fn(), suggest: jest.fn() },
+    usedPorts: async () => new Set<number>(),
+    catalogDir: path.resolve(__dirname, '..', '..', 'catalog'),
+  };
+}

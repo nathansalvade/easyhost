@@ -17,6 +17,14 @@ export interface IInstallPlanner {
   plan(request: InstallRequest): Promise<CreateAppInput>;
 }
 
+/** Host ports held by EasyHost apps: their web ports and their fixed ports. */
+export async function usedHostPorts(prisma: PrismaClient): Promise<Set<number>> {
+  const apps = await prisma.app.findMany({ select: { hostPort: true, fixedPorts: true } });
+  return new Set(
+    apps.flatMap((a) => [a.hostPort, ...(JSON.parse(a.fixedPorts) as FixedPort[]).map((f) => f.hostPort)]),
+  );
+}
+
 const SECRET_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789';
 
 function randomSecret(length = 20): string {
