@@ -21,7 +21,8 @@
 - Error responses keep the Step 1 shape `{ error: { code, message } }`, plus optional extra fields listed per code.
 - Password minimum length: 10 characters.
 - Recovery code: 20 characters from `ABCDEFGHJKMNPQRSTUVWXYZ23456789`, displayed as 4 groups of 5 separated by `-`.
-- Sessions: cookie `easyhost_session`, `HttpOnly`, `SameSite=Strict`, `Secure` only when `TRUST_PROXY=true`, 30-day lifetime extended on use.
+- Sessions: cookie `easyhost_session`, `HttpOnly`, `SameSite=Strict`, `Path=/api`, `Secure` only when `TRUST_PROXY=true`, 30-day lifetime extended on use.
+- `TRUST_PROXY=true` trusts only a proxy on this machine (`app.set('trust proxy', 'loopback')`), never `true` or a hop count.
 - Rate limit: 5 free failures per IP, then delay 30 s doubling up to 15 min; login and recovery counted separately.
 - Catalog image tags must be pinned (contain a digit, never `latest`).
 - Defaults: `HOST=0.0.0.0`, `TRUST_PROXY=false`, `DATA_DIR=./data` (resolved to an absolute path), `CONTAINER_BIND_ADDRESS=0.0.0.0`.

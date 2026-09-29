@@ -44,6 +44,13 @@ export function requireSession(auth: IAuthService, cookieOptions: CookieOptions)
   };
 }
 
+/**
+ * Scoped to `/api`: browsers share cookies across ports of the same host, so
+ * an app published on e.g. :8096 would otherwise receive the session on every
+ * page load. The path limit keeps it off ordinary app pages; it is not a full
+ * isolation (an app serving its own `/api` still gets it), which only running
+ * EasyHost on a hostname of its own provides.
+ */
 export function sessionCookieOptions(secure: boolean): CookieOptions {
-  return { httpOnly: true, sameSite: 'strict', secure, path: '/', maxAge: SESSION_TTL_MS };
+  return { httpOnly: true, sameSite: 'strict', secure, path: '/api', maxAge: SESSION_TTL_MS };
 }

@@ -6,7 +6,9 @@ import { AUTH_COOKIE, makeAuthServiceMock } from '../../test/helpers/auth';
 import type { IAppService } from '../apps/app.service';
 import type { IDockerService } from '../docker/docker.service';
 
-function build(options: { authenticated?: boolean; secureCookies?: boolean; loginLimiter?: RateLimiter } = {}) {
+function build(
+  options: { authenticated?: boolean; secureCookies?: boolean; trustProxy?: boolean; loginLimiter?: RateLimiter } = {},
+) {
   const authService = makeAuthServiceMock(options.authenticated ?? true);
   const appService = { list: jest.fn().mockResolvedValue([]) } as unknown as IAppService;
   const dockerService = { ping: jest.fn().mockResolvedValue(true) } as unknown as IDockerService;
@@ -19,6 +21,7 @@ function build(options: { authenticated?: boolean; secureCookies?: boolean; logi
     loginLimiter,
     recoveryLimiter,
     secureCookies: options.secureCookies ?? false,
+    trustProxy: options.trustProxy ?? false,
   });
   return { app, authService, loginLimiter };
 }
@@ -42,6 +45,13 @@ describe('auth routes', () => {
     expect(cookie).toMatch(/HttpOnly/);
     expect(cookie).toMatch(/SameSite=Strict/);
     expect(cookie).not.toMatch(/Secure/);
+  });
+
+  it('scopes the session cookie to /api so apps on other ports of the same host do not receive it', async () => {
+    const { app, authService } = build({ authenticated: false });
+    authService.login.mockResolvedValue({ sessionToken: 'tok' });
+    const res = await request(app).post('/api/auth/login').send({ password: 'long enough pw' });
+    expect(res.headers['set-cookie'][0]).toMatch(/; Path=\/api;/);
   });
 
   it('marks the cookie Secure when secureCookies is on', async () => {
@@ -80,6 +90,32 @@ describe('auth routes', () => {
     expect(authService.login).toHaveBeenCalledTimes(5);
   });
 
+  it('with TRUST_PROXY, rate-limits by the address the proxy saw, not one the client forged', async () => {
+    const { app, authService } = build({ authenticated: false, trustProxy: true });
+    authService.login.mockRejectedValue(new InvalidCredentialsError());
+    const attempt = (i: number) =>
+      request(app)
+        .post('/api/auth/login')
+        // The client forges the first entry; the proxy appends the real address.
+        .set('X-Forwarded-For', `203.0.113.${i}, 192.168.1.50`)
+        .send({ password: 'wrong wrong' });
+    for (let i = 0; i < 5; i++) {
+      expect((await attempt(i)).status).toBe(401);
+    }
+    expect((await attempt(99)).status).toBe(429);
+  });
+
+  it('with TRUST_PROXY, trusts X-Forwarded-For only from a proxy on this machine', () => {
+    // supertest always connects from loopback, so check the compiled trust
+    // function directly for a LAN device reaching the port without the proxy.
+    const { app } = build({ trustProxy: true });
+    const trusts: (addr: string, hop: number) => boolean = app.get('trust proxy fn');
+    expect(trusts('127.0.0.1', 0)).toBe(true);
+    expect(trusts('::1', 0)).toBe(true);
+    expect(trusts('192.168.1.60', 0)).toBe(false);
+    expect(trusts('10.0.0.7', 0)).toBe(false);
+  });
+
   it('counts recovery attempts separately from logins', async () => {
     const { app, authService } = build({ authenticated: false });
     authService.login.mockRejectedValue(new InvalidCredentialsError());
@@ -96,7 +132,10 @@ describe('auth routes', () => {
     const res = await request(app).post('/api/auth/logout').set('Cookie', AUTH_COOKIE).send({});
     expect(res.status).toBe(204);
     expect(authService.logout).toHaveBeenCalledWith('test-token');
-    expect((res.headers['set-cookie'] as unknown as string[]).some((c) => /^easyhost_session=;/.test(c))).toBe(true);
+    // Must match the path the cookie was set with, or the browser keeps it.
+    expect(
+      (res.headers['set-cookie'] as unknown as string[]).some((c) => /^easyhost_session=;.*Path=\/api;/.test(c)),
+    ).toBe(true);
   });
 
   it('POST /api/auth/password passes the current session token', async () => {

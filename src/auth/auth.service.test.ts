@@ -1,6 +1,7 @@
 import type { PrismaClient } from '@prisma/client';
 import { createTempDb } from '../../test/helpers/temp-db';
 import { AuthService, SESSION_TTL_MS } from './auth.service';
+import * as crypto from './crypto';
 
 describe('AuthService', () => {
   let prisma: PrismaClient;
@@ -36,6 +37,17 @@ describe('AuthService', () => {
     it('can only run once', async () => {
       await auth.setup('long enough pw');
       await expect(auth.setup('another long pw')).rejects.toMatchObject({ code: 'SETUP_ALREADY_DONE' });
+    });
+
+    it('refuses a repeat setup without hashing, so the public route cannot be used to burn CPU', async () => {
+      await auth.setup('long enough pw');
+      const hash = jest.spyOn(crypto, 'hashSecret');
+      try {
+        await expect(auth.setup('another long pw')).rejects.toMatchObject({ code: 'SETUP_ALREADY_DONE' });
+        expect(hash).not.toHaveBeenCalled();
+      } finally {
+        hash.mockRestore();
+      }
     });
 
     it('lets only one of two concurrent setups succeed', async () => {

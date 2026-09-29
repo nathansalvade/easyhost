@@ -54,6 +54,12 @@ export class AuthService implements IAuthService {
 
   async setup(password: string) {
     assertPasswordLength(password);
+    // Cheap check first: the route stays public after setup, and without it
+    // every call would cost two scrypt hashes. The unique-key catch below
+    // still settles concurrent first-time setups.
+    if (await this.prisma.account.findUnique({ where: { id: ACCOUNT_ID }, select: { id: true } })) {
+      throw new SetupAlreadyDoneError();
+    }
     const recoveryCode = generateRecoveryCode();
     const [passwordHash, recoveryCodeHash] = await Promise.all([
       hashSecret(password),
