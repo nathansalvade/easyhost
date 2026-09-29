@@ -5,7 +5,7 @@ import { AUTH_COOKIE, makeAuthServiceMock } from '../../test/helpers/auth';
 import type { IAppService } from '../apps/app.service';
 import type { IDockerService } from '../docker/docker.service';
 import type { IInstallPlanner, InstallRequest } from '../apps/install-planner';
-import { makeViewContext } from '../../test/helpers/views';
+import { makeSystemDeps, makeViewContext } from '../../test/helpers/views';
 
 function makeApp(overrides: Record<string, unknown> = {}) {
   return {
@@ -53,7 +53,7 @@ function build() {
   const appService = makeAppServiceMock();
   const planner = makePlannerMock();
   const dockerService = makeDockerServiceMock();
-  const app = createServer({ appService, dockerService, authService: makeAuthServiceMock(), planner, views: makeViewContext() });
+  const app = createServer({ appService, dockerService, authService: makeAuthServiceMock(), planner, views: makeViewContext(), ...makeSystemDeps() });
   return { app, appService, planner, dockerService };
 }
 
@@ -76,7 +76,7 @@ describe('createServer', () => {
       const appService = makeAppServiceMock();
       const dockerService = makeDockerServiceMock();
       dockerService.ping.mockResolvedValue(true);
-      const app = createServer({ appService, dockerService, authService: makeAuthServiceMock(), planner: makePlannerMock(), views: makeViewContext() });
+      const app = createServer({ appService, dockerService, authService: makeAuthServiceMock(), planner: makePlannerMock(), views: makeViewContext(), ...makeSystemDeps() });
 
       const res = await request(app).get('/health');
 
@@ -88,7 +88,7 @@ describe('createServer', () => {
       const appService = makeAppServiceMock();
       const dockerService = makeDockerServiceMock();
       dockerService.ping.mockResolvedValue(false);
-      const app = createServer({ appService, dockerService, authService: makeAuthServiceMock(), planner: makePlannerMock(), views: makeViewContext() });
+      const app = createServer({ appService, dockerService, authService: makeAuthServiceMock(), planner: makePlannerMock(), views: makeViewContext(), ...makeSystemDeps() });
 
       const res = await request(app).get('/health');
 
@@ -101,7 +101,7 @@ describe('createServer', () => {
     it('returns the list of apps', async () => {
       const appService = makeAppServiceMock();
       appService.list.mockResolvedValue([makeApp()] as never);
-      const app = createServer({ appService, dockerService: makeDockerServiceMock(), authService: makeAuthServiceMock(), planner: makePlannerMock(), views: makeViewContext() });
+      const app = createServer({ appService, dockerService: makeDockerServiceMock(), authService: makeAuthServiceMock(), planner: makePlannerMock(), views: makeViewContext(), ...makeSystemDeps() });
 
       const res = await request(app).get('/api/apps').set('Cookie', AUTH_COOKIE);
 
@@ -115,7 +115,7 @@ describe('createServer', () => {
     it('returns a single app', async () => {
       const appService = makeAppServiceMock();
       appService.get.mockResolvedValue(makeApp() as never);
-      const app = createServer({ appService, dockerService: makeDockerServiceMock(), authService: makeAuthServiceMock(), planner: makePlannerMock(), views: makeViewContext() });
+      const app = createServer({ appService, dockerService: makeDockerServiceMock(), authService: makeAuthServiceMock(), planner: makePlannerMock(), views: makeViewContext(), ...makeSystemDeps() });
 
       const res = await request(app).get('/api/apps/app1').set('Cookie', AUTH_COOKIE);
 
@@ -127,7 +127,7 @@ describe('createServer', () => {
     it('returns 404 with the error shape when the app does not exist', async () => {
       const appService = makeAppServiceMock();
       appService.get.mockRejectedValue(new NotFoundError('App app1 not found'));
-      const app = createServer({ appService, dockerService: makeDockerServiceMock(), authService: makeAuthServiceMock(), planner: makePlannerMock(), views: makeViewContext() });
+      const app = createServer({ appService, dockerService: makeDockerServiceMock(), authService: makeAuthServiceMock(), planner: makePlannerMock(), views: makeViewContext(), ...makeSystemDeps() });
 
       const res = await request(app).get('/api/apps/app1').set('Cookie', AUTH_COOKIE);
 
@@ -142,7 +142,7 @@ describe('createServer', () => {
     it('plans a custom-image install and answers 202', async () => {
       const appService = makeAppServiceMock();
       appService.create.mockResolvedValue(makeApp() as never);
-      const app = createServer({ appService, dockerService: makeDockerServiceMock(), authService: makeAuthServiceMock(), planner: makePlannerMock(), views: makeViewContext() });
+      const app = createServer({ appService, dockerService: makeDockerServiceMock(), authService: makeAuthServiceMock(), planner: makePlannerMock(), views: makeViewContext(), ...makeSystemDeps() });
 
       const res = await request(app)
         .post('/api/apps')
@@ -163,7 +163,7 @@ describe('createServer', () => {
     it('defaults containerPort to hostPort when omitted, and passes containerPort through when given', async () => {
       const appService = makeAppServiceMock();
       appService.create.mockResolvedValue(makeApp() as never);
-      const app = createServer({ appService, dockerService: makeDockerServiceMock(), authService: makeAuthServiceMock(), planner: makePlannerMock(), views: makeViewContext() });
+      const app = createServer({ appService, dockerService: makeDockerServiceMock(), authService: makeAuthServiceMock(), planner: makePlannerMock(), views: makeViewContext(), ...makeSystemDeps() });
 
       await request(app)
         .post('/api/apps')
@@ -177,7 +177,7 @@ describe('createServer', () => {
 
     it('returns 400 with VALIDATION_FAILED and never calls the service when the body is missing required fields', async () => {
       const appService = makeAppServiceMock();
-      const app = createServer({ appService, dockerService: makeDockerServiceMock(), authService: makeAuthServiceMock(), planner: makePlannerMock(), views: makeViewContext() });
+      const app = createServer({ appService, dockerService: makeDockerServiceMock(), authService: makeAuthServiceMock(), planner: makePlannerMock(), views: makeViewContext(), ...makeSystemDeps() });
 
       const res = await request(app).post('/api/apps').set('Cookie', AUTH_COOKIE).send({ image: 'nginx' });
 
@@ -188,7 +188,7 @@ describe('createServer', () => {
 
     it('returns 400 and never calls the service when hostPort is not a positive int <= 65535', async () => {
       const appService = makeAppServiceMock();
-      const app = createServer({ appService, dockerService: makeDockerServiceMock(), authService: makeAuthServiceMock(), planner: makePlannerMock(), views: makeViewContext() });
+      const app = createServer({ appService, dockerService: makeDockerServiceMock(), authService: makeAuthServiceMock(), planner: makePlannerMock(), views: makeViewContext(), ...makeSystemDeps() });
 
       const res = await request(app)
         .post('/api/apps')
@@ -201,7 +201,7 @@ describe('createServer', () => {
 
     it('returns 400 and never calls the service when hostPort is not an integer', async () => {
       const appService = makeAppServiceMock();
-      const app = createServer({ appService, dockerService: makeDockerServiceMock(), authService: makeAuthServiceMock(), planner: makePlannerMock(), views: makeViewContext() });
+      const app = createServer({ appService, dockerService: makeDockerServiceMock(), authService: makeAuthServiceMock(), planner: makePlannerMock(), views: makeViewContext(), ...makeSystemDeps() });
 
       const res = await request(app)
         .post('/api/apps')
@@ -214,7 +214,7 @@ describe('createServer', () => {
 
     it('returns 400 and never calls the service when containerPort is not positive', async () => {
       const appService = makeAppServiceMock();
-      const app = createServer({ appService, dockerService: makeDockerServiceMock(), authService: makeAuthServiceMock(), planner: makePlannerMock(), views: makeViewContext() });
+      const app = createServer({ appService, dockerService: makeDockerServiceMock(), authService: makeAuthServiceMock(), planner: makePlannerMock(), views: makeViewContext(), ...makeSystemDeps() });
 
       const res = await request(app)
         .post('/api/apps')
@@ -227,7 +227,7 @@ describe('createServer', () => {
 
     it('returns 400 and never calls the service when an env key is invalid', async () => {
       const appService = makeAppServiceMock();
-      const app = createServer({ appService, dockerService: makeDockerServiceMock(), authService: makeAuthServiceMock(), planner: makePlannerMock(), views: makeViewContext() });
+      const app = createServer({ appService, dockerService: makeDockerServiceMock(), authService: makeAuthServiceMock(), planner: makePlannerMock(), views: makeViewContext(), ...makeSystemDeps() });
 
       const res = await request(app)
         .post('/api/apps')
@@ -247,7 +247,7 @@ describe('createServer', () => {
     it('accepts valid env keys', async () => {
       const appService = makeAppServiceMock();
       appService.create.mockResolvedValue(makeApp() as never);
-      const app = createServer({ appService, dockerService: makeDockerServiceMock(), authService: makeAuthServiceMock(), planner: makePlannerMock(), views: makeViewContext() });
+      const app = createServer({ appService, dockerService: makeDockerServiceMock(), authService: makeAuthServiceMock(), planner: makePlannerMock(), views: makeViewContext(), ...makeSystemDeps() });
 
       const res = await request(app)
         .post('/api/apps')
@@ -268,7 +268,7 @@ describe('createServer', () => {
     it('maps a ConflictError from the service to 409 with the error shape', async () => {
       const appService = makeAppServiceMock();
       appService.create.mockRejectedValue(new ConflictError('name taken', 'NAME_TAKEN'));
-      const app = createServer({ appService, dockerService: makeDockerServiceMock(), authService: makeAuthServiceMock(), planner: makePlannerMock(), views: makeViewContext() });
+      const app = createServer({ appService, dockerService: makeDockerServiceMock(), authService: makeAuthServiceMock(), planner: makePlannerMock(), views: makeViewContext(), ...makeSystemDeps() });
 
       const res = await request(app)
         .post('/api/apps')
@@ -282,7 +282,7 @@ describe('createServer', () => {
     it('maps an unrecognised error to 500 with a generic message', async () => {
       const appService = makeAppServiceMock();
       appService.create.mockRejectedValue(new Error('raw internal failure'));
-      const app = createServer({ appService, dockerService: makeDockerServiceMock(), authService: makeAuthServiceMock(), planner: makePlannerMock(), views: makeViewContext() });
+      const app = createServer({ appService, dockerService: makeDockerServiceMock(), authService: makeAuthServiceMock(), planner: makePlannerMock(), views: makeViewContext(), ...makeSystemDeps() });
 
       const res = await request(app)
         .post('/api/apps')
@@ -299,7 +299,7 @@ describe('createServer', () => {
     it('starts the app', async () => {
       const appService = makeAppServiceMock();
       appService.start.mockResolvedValue(makeApp({ status: 'RUNNING' }) as never);
-      const app = createServer({ appService, dockerService: makeDockerServiceMock(), authService: makeAuthServiceMock(), planner: makePlannerMock(), views: makeViewContext() });
+      const app = createServer({ appService, dockerService: makeDockerServiceMock(), authService: makeAuthServiceMock(), planner: makePlannerMock(), views: makeViewContext(), ...makeSystemDeps() });
 
       const res = await request(app).post('/api/apps/app1/start').set('Cookie', AUTH_COOKIE).send({});
 
@@ -310,7 +310,7 @@ describe('createServer', () => {
     it('maps DockerUnavailableError to 503', async () => {
       const appService = makeAppServiceMock();
       appService.start.mockRejectedValue(new DockerUnavailableError('daemon down'));
-      const app = createServer({ appService, dockerService: makeDockerServiceMock(), authService: makeAuthServiceMock(), planner: makePlannerMock(), views: makeViewContext() });
+      const app = createServer({ appService, dockerService: makeDockerServiceMock(), authService: makeAuthServiceMock(), planner: makePlannerMock(), views: makeViewContext(), ...makeSystemDeps() });
 
       const res = await request(app).post('/api/apps/app1/start').set('Cookie', AUTH_COOKIE).send({});
 
@@ -321,7 +321,7 @@ describe('createServer', () => {
     it('maps ContainerMissingError to 409 when the container was deleted outside EasyHost', async () => {
       const appService = makeAppServiceMock();
       appService.start.mockRejectedValue(new ContainerMissingError());
-      const app = createServer({ appService, dockerService: makeDockerServiceMock(), authService: makeAuthServiceMock(), planner: makePlannerMock(), views: makeViewContext() });
+      const app = createServer({ appService, dockerService: makeDockerServiceMock(), authService: makeAuthServiceMock(), planner: makePlannerMock(), views: makeViewContext(), ...makeSystemDeps() });
 
       const res = await request(app).post('/api/apps/app1/start').set('Cookie', AUTH_COOKIE).send({});
 
@@ -336,7 +336,7 @@ describe('createServer', () => {
     it('stops the app', async () => {
       const appService = makeAppServiceMock();
       appService.stop.mockResolvedValue(makeApp({ status: 'STOPPED' }) as never);
-      const app = createServer({ appService, dockerService: makeDockerServiceMock(), authService: makeAuthServiceMock(), planner: makePlannerMock(), views: makeViewContext() });
+      const app = createServer({ appService, dockerService: makeDockerServiceMock(), authService: makeAuthServiceMock(), planner: makePlannerMock(), views: makeViewContext(), ...makeSystemDeps() });
 
       const res = await request(app).post('/api/apps/app1/stop').set('Cookie', AUTH_COOKIE).send({});
 
@@ -415,7 +415,7 @@ describe('createServer', () => {
     it('returns logs as text/plain with the default tail of 200', async () => {
       const appService = makeAppServiceMock();
       appService.logs.mockResolvedValue('line1\nline2\n');
-      const app = createServer({ appService, dockerService: makeDockerServiceMock(), authService: makeAuthServiceMock(), planner: makePlannerMock(), views: makeViewContext() });
+      const app = createServer({ appService, dockerService: makeDockerServiceMock(), authService: makeAuthServiceMock(), planner: makePlannerMock(), views: makeViewContext(), ...makeSystemDeps() });
 
       const res = await request(app).get('/api/apps/app1/logs').set('Cookie', AUTH_COOKIE);
 
@@ -428,7 +428,7 @@ describe('createServer', () => {
     it('forwards a custom tail query parameter', async () => {
       const appService = makeAppServiceMock();
       appService.logs.mockResolvedValue('log');
-      const app = createServer({ appService, dockerService: makeDockerServiceMock(), authService: makeAuthServiceMock(), planner: makePlannerMock(), views: makeViewContext() });
+      const app = createServer({ appService, dockerService: makeDockerServiceMock(), authService: makeAuthServiceMock(), planner: makePlannerMock(), views: makeViewContext(), ...makeSystemDeps() });
 
       await request(app).get('/api/apps/app1/logs?tail=50').set('Cookie', AUTH_COOKIE);
 
@@ -437,7 +437,7 @@ describe('createServer', () => {
 
     it('returns 400 for a non-numeric tail', async () => {
       const appService = makeAppServiceMock();
-      const app = createServer({ appService, dockerService: makeDockerServiceMock(), authService: makeAuthServiceMock(), planner: makePlannerMock(), views: makeViewContext() });
+      const app = createServer({ appService, dockerService: makeDockerServiceMock(), authService: makeAuthServiceMock(), planner: makePlannerMock(), views: makeViewContext(), ...makeSystemDeps() });
 
       const res = await request(app).get('/api/apps/app1/logs?tail=abc').set('Cookie', AUTH_COOKIE);
 

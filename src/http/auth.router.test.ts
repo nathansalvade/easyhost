@@ -3,7 +3,7 @@ import { createServer } from './server';
 import { RateLimiter } from '../auth/rate-limiter';
 import { InvalidCredentialsError } from '../errors';
 import { AUTH_COOKIE, makeAuthServiceMock } from '../../test/helpers/auth';
-import { makeViewContext } from '../../test/helpers/views';
+import { makeSystemDeps, makeViewContext } from '../../test/helpers/views';
 import type { IAppService } from '../apps/app.service';
 import type { IDockerService } from '../docker/docker.service';
 
@@ -21,6 +21,7 @@ function build(
     authService,
     planner: { plan: jest.fn() },
     views: makeViewContext(),
+    ...makeSystemDeps(),
     loginLimiter,
     recoveryLimiter,
     secureCookies: options.secureCookies ?? false,
