@@ -144,6 +144,21 @@ responses carry the remaining seconds. A success resets the counter.
 - State-changing requests must be `application/json`; together with
   `SameSite=Strict` this closes cross-site request forgery.
 
+### Isolation from installed apps
+
+Browsers send a cookie to every port of the host it was set for, so an app
+opened at `http://server:8096` shares cookies with EasyHost at
+`http://server:3000`. The session cookie is limited to `Path=/api`, which keeps
+it off ordinary app pages, but an app that serves its own `/api` path still
+receives it. Because the session controls Docker, a malicious app image could
+use it to take over the server.
+
+**Recommendation:** open EasyHost on a hostname of its own that no installed
+app uses, for example `easyhost.home` (via a local DNS entry, Pi-hole, or the
+router) or through a reverse proxy with its own name, and open the apps by the
+server's IP address or other names. Cookies are then never shared. Installing
+only images you trust remains the main defence either way.
+
 ## Catalog
 
 Each `catalog/<id>.json`:
