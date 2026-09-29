@@ -108,7 +108,7 @@ export class AuthService implements IAuthService {
   async recover(recoveryCode: string, newPassword: string) {
     assertPasswordLength(newPassword);
     const account = await this.prisma.account.findUnique({ where: { id: ACCOUNT_ID } });
-    if (!account || !(await verifyRecoveryCode(normalizeRecoveryCode(recoveryCode), account.recoveryCodeHash))) {
+    if (!account || !verifyRecoveryCode(normalizeRecoveryCode(recoveryCode), account.recoveryCodeHash)) {
       throw new InvalidRecoveryCodeError();
     }
     const newCode = generateRecoveryCode();

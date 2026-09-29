@@ -56,14 +56,13 @@ describe('recovery code hashes', () => {
   it('uses a fast SHA-256 hash and verifies only the right code', async () => {
     const stored = hashRecoveryCode('AAAAABBBBBCCCCCDDDDD');
     expect(stored).toMatch(/^sha256\$[0-9a-f]{64}$/);
-    await expect(verifyRecoveryCode('AAAAABBBBBCCCCCDDDDD', stored)).resolves.toBe(true);
-    await expect(verifyRecoveryCode('AAAAABBBBBCCCCCDDDDE', stored)).resolves.toBe(false);
+    expect(verifyRecoveryCode('AAAAABBBBBCCCCCDDDDD', stored)).toBe(true);
+    expect(verifyRecoveryCode('AAAAABBBBBCCCCCDDDDE', stored)).toBe(false);
   });
 
-  it('still accepts a code stored with scrypt by an earlier build', async () => {
-    const legacy = await hashSecret('AAAAABBBBBCCCCCDDDDD');
-    await expect(verifyRecoveryCode('AAAAABBBBBCCCCCDDDDD', legacy)).resolves.toBe(true);
-    await expect(verifyRecoveryCode('AAAAABBBBBCCCCCDDDDE', legacy)).resolves.toBe(false);
+  it('rejects any other stored format without running scrypt', async () => {
+    const other = await hashSecret('AAAAABBBBBCCCCCDDDDD');
+    expect(verifyRecoveryCode('AAAAABBBBBCCCCCDDDDD', other)).toBe(false);
   });
 });
 
