@@ -1,105 +1,275 @@
-<h1 align="left">Nathan Salvadé</h1>
+# EasyHost
 
-<p align="left">
-  IT infrastructure &amp; systems — apprentice, Switzerland<br>
-  I build web applications and automation, and I run my own Linux server end to end.
-</p>
+**Host your own apps at home, without touching a terminal.**
 
-<p align="left">
-  <a href="https://famsalvade.com"><img alt="Website" src="https://img.shields.io/badge/famsalvade.com-live-2f81f7?style=flat-square&logo=googlechrome&logoColor=white"></a>
-  <img alt="Location" src="https://img.shields.io/badge/Switzerland-6e7681?style=flat-square&logo=googlemaps&logoColor=white">
-  <img alt="Focus" src="https://img.shields.io/badge/focus-infrastructure%20%26%20development-6e7681?style=flat-square">
-  <a href="https://instagram.com/nathansalvade"><img alt="Instagram" src="https://img.shields.io/badge/Instagram-E4405F?style=flat-square&logo=instagram&logoColor=white"></a>
-</p>
+EasyHost is an open source web app that installs and manages self-hosted apps
+(media servers, file sharing, smart home, ad blocking…) on a computer in your
+home, such as a Raspberry Pi or an old PC. You pick an app from a catalog, click
+Install, and EasyHost downloads it, starts it and shows you how to use it, step
+by step, for your system and your devices.
 
----
+Under the hood every app runs as a [Docker](https://www.docker.com/) container,
+but you never need to know that: the words "container", "image" and "port" only
+appear in the Advanced sections.
 
-## About
+## Features
 
-- IT infrastructure apprentice, learning systems and software development in parallel.
-- I run an **Ubuntu Server 24.04 LTS** environment and self-host my own site at [famsalvade.com](https://famsalvade.com).
-- Most of what I learn comes from building things and keeping them running: web apps, remote access, DNS, TLS, and the fixes when something breaks.
-- Interested in **AI &amp; LLM integration** and in automating the boring parts of sysadmin work.
+- **One-click installs** from a built-in catalog of seven apps.
+- **Step-by-step guides** for each app: what to do after installing, what to do
+  on the server (picked automatically for Ubuntu, Fedora, Windows, macOS…), and
+  how to set up each device (router, Windows, Mac, Linux, Android, iPhone).
+- **Your data is kept safe:** every app stores its files in its own folder, which
+  is kept when the app is removed unless you choose to delete it.
+- **Generated passwords** for apps that need one (Pi-hole's admin password),
+  shown on the app's page.
+- **Plain-language errors**, such as "Port 53 is already used by another program
+  on the server", never raw technical messages.
+- **Logs, start and stop** for every app.
+- **Custom images:** install any Docker image that is not in the catalog.
+- **Password protected**, with a recovery code if you forget the password and
+  protection against password guessing.
+- **Works on phones** (bottom navigation bar) and follows your light/dark theme.
+- **Private by design:** no telemetry and no requests to outside services; the
+  catalog and icons ship with EasyHost.
 
+## Included apps
 
-## Tech
+| App | What it does | Default port |
+|---|---|---|
+| [Jellyfin](https://jellyfin.org/) | Stream your movies, shows and music | 8096 |
+| [Audiobookshelf](https://www.audiobookshelf.org/) | Audiobooks and podcasts, with synced progress | 13378 |
+| [Nextcloud](https://nextcloud.com/) | Files, photos, calendar and contacts | 8080 |
+| [File Browser](https://filebrowser.org/) | Upload, download and share files from a browser | 8081 |
+| [Home Assistant](https://www.home-assistant.io/) | Control lights, sensors and smart devices | 8123 |
+| [Uptime Kuma](https://github.com/louislam/uptime-kuma) | Get alerts when a website or device goes down | 3001 |
+| [Pi-hole](https://pi-hole.net/) | Block ads and trackers for your whole home | 8082 (and 53 for DNS) |
 
-**Languages**
+If a default port is already taken, EasyHost suggests the next free one.
 
-![Java](https://img.shields.io/badge/Java-ED8B00?style=flat-square&logo=openjdk&logoColor=white)
-![Python](https://img.shields.io/badge/Python-3776AB?style=flat-square&logo=python&logoColor=white)
-![JavaScript](https://img.shields.io/badge/JavaScript-F7DF1E?style=flat-square&logo=javascript&logoColor=black)
-![HTML5](https://img.shields.io/badge/HTML5-E34F26?style=flat-square&logo=html5&logoColor=white)
-![CSS3](https://img.shields.io/badge/CSS3-1572B6?style=flat-square&logo=css3&logoColor=white)
+## Requirements
 
-**Backend &amp; data**
+- **Docker**, running on the same computer:
+  - Linux: [Docker Engine](https://docs.docker.com/engine/install/). The user
+    running EasyHost must be allowed to use Docker (for example, be in the
+    `docker` group).
+  - Windows and macOS: [Docker Desktop](https://www.docker.com/products/docker-desktop/).
+- **Node.js 20.19 or newer** (22 recommended), with npm.
+- **Git**, to download EasyHost.
 
-![MySQL](https://img.shields.io/badge/MySQL-4479A1?style=flat-square&logo=mysql&logoColor=white)
-![Apache](https://img.shields.io/badge/Apache-D22128?style=flat-square&logo=apache&logoColor=white)
+## Installation
 
-**Systems &amp; virtualization**
+```bash
+git clone https://github.com/nathansalvade/easyhost.git
+cd easyhost
+npm ci
+npx prisma generate
+npm run build
+```
 
-![Ubuntu Server](https://img.shields.io/badge/Ubuntu_Server_24.04_LTS-E95420?style=flat-square&logo=ubuntu&logoColor=white)
-![Raspberry Pi](https://img.shields.io/badge/Raspberry_Pi_4-A22846?style=flat-square&logo=raspberrypi&logoColor=white)
-![VirtualBox](https://img.shields.io/badge/Oracle_VirtualBox-183A61?style=flat-square&logo=virtualbox&logoColor=white)
-![Docker](https://img.shields.io/badge/Docker-2496ED?style=flat-square&logo=docker&logoColor=white)
+Then create your settings file and the database:
 
-**Networking &amp; ops**
+```bash
+cp .env.example .env
+npx prisma migrate deploy
+```
 
-![Tailscale](https://img.shields.io/badge/Tailscale-242424?style=flat-square&logo=tailscale&logoColor=white)
-![Cisco Packet Tracer](https://img.shields.io/badge/Cisco_Packet_Tracer-1BA0D7?style=flat-square&logo=cisco&logoColor=white)
-![Cloudflare](https://img.shields.io/badge/Cloudflare-F38020?style=flat-square&logo=cloudflare&logoColor=white)
+## Running EasyHost
 
-**Tools**
+EasyHost reads its settings from **environment variables** (see
+[Configuration](#configuration)). Prisma reads `DATABASE_URL` from `.env` by
+itself, but the other settings must be set in the environment before starting.
 
-![Git](https://img.shields.io/badge/Git-F05032?style=flat-square&logo=git&logoColor=white)
-![GitHub](https://img.shields.io/badge/GitHub-181717?style=flat-square&logo=github&logoColor=white)
-![GitHub Actions](https://img.shields.io/badge/GitHub_Actions-2088FF?style=flat-square&logo=githubactions&logoColor=white)
-![VS Code](https://img.shields.io/badge/VS_Code-007ACC?style=flat-square&logo=visualstudiocode&logoColor=white)
-![Windows Terminal](https://img.shields.io/badge/Windows_Terminal-4D4D4D?style=flat-square&logo=windowsterminal&logoColor=white)
+**Linux and macOS** — load every setting from `.env` and start:
 
-**Currently learning**
+```bash
+set -a; source .env; set +a
+npm start
+```
 
-`AI & LLM integration` · `Automation & scripting` · `Linux server administration` · `Networking (Cisco)`
+**Windows (PowerShell)** — set the settings you need, then start:
 
+```powershell
+$env:DATABASE_URL = "file:./dev.db"
+$env:DOCKER_SOCKET_PATH = "//./pipe/docker_engine"
+$env:DATA_DIR = "C:\EasyHost\data"
+npm start
+```
 
-## Selected projects
+When it is running, the terminal shows:
 
-### famsalvade.com — [famsalvade.com](https://famsalvade.com)
+```
+EasyHost is running at http://<server-IP>:3000
+```
 
-Personal portfolio site with a password-protected private area, self-hosted on my own Ubuntu Server 24.04 LTS.
+Open that address from any device on your home network, for example
+`http://192.168.1.50:3000`.
 
-- Served with **Apache** on my own Ubuntu Server, fully self-hosted
-- **Private area** gated by a password that is verified against a stored **hash** — never kept in plaintext
-- Set up **HTTPS** by purchasing and installing the SSL certificate manually (no certbot / automated issuance)
-- Managed the **DNS zone on Infomaniak**: edited A records to add and route subdomains
+### First run
 
-`Ubuntu Server` · `Apache` · `MySQL` · `Infomaniak DNS` · `SSL/TLS`
+1. **Create your password** (at least 10 characters).
+2. **Save your recovery code.** It is the only way back in if you forget your
+   password, and it is shown only once. Copy it or download it.
+3. You land on the **Home** screen, which suggests a few apps to start with.
 
-### Homelab &amp; remote access
+### Keeping it running (Linux)
 
-Ubuntu Server for self-hosted services, kept reachable and manageable from anywhere without leaving it powered on 24/7.
+To start EasyHost automatically when the computer boots, create a systemd
+service, for example `/etc/systemd/system/easyhost.service`:
 
-- **Jellyfin** media server self-hosted on the same Ubuntu Server
-- A **Raspberry Pi 4** runs **Tailscale** as an always-on, low-power entry point into the network
-- A small self-hosted page triggers a **remote power-on (Wake-on-LAN)** of the main server; once it boots I manage it over **SSH**
-- Result: the main server stays off when idle but can be woken and administered on demand from anywhere
+```ini
+[Unit]
+Description=EasyHost
+After=network-online.target docker.service
+Requires=docker.service
 
-`Raspberry Pi 4` · `Tailscale` · `Wake-on-LAN` · `SSH` · `Jellyfin`
+[Service]
+User=youruser
+WorkingDirectory=/home/youruser/easyhost
+EnvironmentFile=/home/youruser/easyhost/.env
+ExecStart=/usr/bin/npm start
+Restart=on-failure
 
-## Certifications
+[Install]
+WantedBy=multi-user.target
+```
 
-**Anthropic**
+Replace `youruser` and the paths with your own, then run
+`sudo systemctl enable --now easyhost`.
 
-- Claude 101 — [verify](https://verify.skilljar.com/c/xifkxe8dw86q)
-- Claude Code 101 — [verify](https://verify.skilljar.com/c/iv2q8ru7wyv3)
-- Claude Code in Action — [verify](https://verify.skilljar.com/c/sn4ubv25t3d8)
+## Configuration
 
-**Microsoft Learn**
+All settings are environment variables. `.env.example` lists them with their
+defaults.
 
-- Introduction to artificial intelligence concepts — [verify](https://learn.microsoft.com/api/achievements/share/it-it/nathansalvade/NQJNP8MF?sharingId=695F43D23823D554)
-- Introduction to natural language processing (NLP) concepts — [verify](https://learn.microsoft.com/api/achievements/share/it-it/nathansalvade/NQJNKE4F?sharingId=695F43D23823D554)
-- Introduction to AI and generative agents — [verify](https://learn.microsoft.com/api/achievements/share/it-it/nathansalvade/7D67BHLZ?sharingId=695F43D23823D554)
+| Variable | Default | What it does |
+|---|---|---|
+| `PORT` | `3000` | Port the EasyHost interface listens on. |
+| `HOST` | `0.0.0.0` | Address the interface listens on. `0.0.0.0` makes it reachable from your home network; `127.0.0.1` makes it reachable only from the server itself. |
+| `DATABASE_URL` | — (required) | Where EasyHost keeps its database (a SQLite file), e.g. `file:./dev.db`. A relative path is relative to the `prisma/` folder. |
+| `DATA_DIR` | `./data` | Folder where each app's data is kept, in `DATA_DIR/apps/<app id>/`. Relative paths are resolved from the folder EasyHost is started in. |
+| `DOCKER_SOCKET_PATH` | — | How EasyHost reaches Docker: `/var/run/docker.sock` on Linux and macOS, `//./pipe/docker_engine` on Windows (Docker Desktop). |
+| `DOCKER_HOST` | — | Host name of a remote Docker daemon, used instead of `DOCKER_SOCKET_PATH`. Known issue: addresses written as URLs (`tcp://…`, `npipe://…`) do not work yet, so prefer `DOCKER_SOCKET_PATH`. |
+| `CONTAINER_BIND_ADDRESS` | `0.0.0.0` | Address the installed apps listen on. `0.0.0.0` makes them reachable from your home network at `http://<server-IP>:<port>`; `127.0.0.1` keeps them reachable only from the server. |
+| `TRUST_PROXY` | `false` | Set to `true` only when EasyHost runs behind an HTTPS reverse proxy **on the same computer** (see [Security](#security)). Turns on secure cookies and reads visitors' real addresses from the proxy. |
+| `LOG_TAIL_MAX` | `1000` | Maximum number of log lines an app page can request. |
 
+## Adding apps to the catalog
 
-> Repositories are being published progressively.
+The catalog lives in the `catalog/` folder: one JSON file per app, plus its icon
+in `catalog/icons/`. To add an app, create `catalog/<id>.json` (the file name
+must match the `id`) and `catalog/icons/<id>.svg`, then restart EasyHost. An
+invalid entry stops EasyHost at startup with a message naming the file.
+
+A minimal entry:
+
+```json
+{
+  "id": "whoami",
+  "name": "Who Am I",
+  "description": "A tiny web page that shows details about your request.",
+  "category": "Monitoring",
+  "icon": "icons/whoami.svg",
+  "image": "traefik/whoami:v1.10",
+  "containerPort": 80,
+  "defaultHostPort": 8090,
+  "guide": {
+    "afterInstall": [{ "text": "Click Open to see the page." }]
+  }
+}
+```
+
+All the fields:
+
+| Field | Required | Description |
+|---|---|---|
+| `id` | yes | Lowercase letters, numbers and dashes. Also the file name. |
+| `name` | yes | Name shown to users. |
+| `description` | yes | One sentence, at most 120 characters. |
+| `category` | yes | One of `Media`, `Files`, `Smart home`, `Network`, `Monitoring`. |
+| `icon` | yes | `icons/<name>.svg`; the file must exist. |
+| `image` | yes | Docker image with a **pinned version tag** (it must contain a digit and must not be `latest`), e.g. `jellyfin/jellyfin:12.1`. |
+| `containerPort` | yes | Port the app listens on inside its container. |
+| `defaultHostPort` | yes | Port suggested on the server. |
+| `openPath` | no | Path opened by the Open button, e.g. `/admin`. |
+| `env` | no | Environment variables for the app, e.g. `{ "TZ": "Europe/Rome" }`. |
+| `volumes` | no | Folders to keep: `[{ "name": "config", "containerPath": "/config" }]`. Each becomes `DATA_DIR/apps/<app id>/<name>`. |
+| `fixedPorts` | no | Ports that must be exact: `[{ "containerPort": 53, "hostPort": 53, "protocol": "udp" }]`. |
+| `generatedSecrets` | no | Passwords EasyHost generates and passes as environment variables: `[{ "name": "adminPassword", "label": "Admin password", "env": "APP_PASSWORD" }]`. |
+| `dataOwner` | no | `{ "uid": 1000, "gid": 1000 }` when the image runs as a fixed non-root user, so its data folders are writable. |
+| `guide` | yes | `afterInstall` steps (required), plus optional `server` steps (`linux` with a `default` and per-distribution variants such as `ubuntu`, `windows`, `macos`) and `devices` steps (`router`, `windows`, `macos`, `linux`, `android`, `ios`). Each step is `{ "text": "…", "command": "…" }`, where `command` is optional and gets a Copy button. `{serverAddress}` in a text is replaced with the server's address. |
+
+## Security
+
+- EasyHost controls Docker, which effectively means it controls the server.
+  **Do not expose it to the internet.** Home routers keep it private unless you
+  forward its port.
+- Access is protected by a password (at least 10 characters). Repeated wrong
+  attempts are slowed down, and browsers you have logged in with are never
+  locked out. If you lose the password, use your recovery code on the
+  "Forgot password?" page.
+- **Use a hostname of its own for EasyHost.** Browsers share login cookies
+  between all ports of the same address, so an installed app opened at
+  `http://server:8096` could receive EasyHost's login cookie from
+  `http://server:3000`. EasyHost limits the cookie to its own `/api` paths,
+  but the complete fix is to open EasyHost on a name no app uses, for example
+  `easyhost.home` (set up in Pi-hole or your router), and open apps by the
+  server's IP address.
+- Only install images you trust.
+- For HTTPS, put a reverse proxy (such as Caddy or nginx) **on the same
+  computer** in front of EasyHost and set `TRUST_PROXY=true`. A proxy on
+  another machine or in a separate Docker container is not trusted for
+  visitors' addresses.
+
+## Limitations
+
+- Apps cannot yet use folders that already exist on the server (for example an
+  existing movie collection). Put your files in the app's data folder shown on
+  its page.
+- Reinstalling an app after removing it (with its data kept) starts with a new,
+  empty data folder. The old folder stays on disk until you delete it.
+- There is one administrator account.
+- The interface is in English.
+
+## Development
+
+```bash
+npm ci
+npx prisma generate
+npm run dev        # the server, with DATABASE_URL and Docker settings in the environment
+npm run dev:web    # the interface with live reload at http://localhost:5173 (proxies to :3000)
+```
+
+| Command | What it does |
+|---|---|
+| `npm run build` | Builds the server (`dist/`) and the interface (`web/dist/`). |
+| `npm start` | Runs the built server, which also serves the interface. |
+| `npm test` | Server tests (Jest) and interface tests (Vitest). No Docker needed. |
+| `npm run test:e2e` | Browser tests (Playwright) against the built app. Run `npm run build` first; needs Chromium (`npx playwright install chromium`). |
+| `npm run typecheck` | TypeScript checks for the server, interface and browser tests. |
+| `npm run lint` | ESLint. |
+
+Project layout:
+
+```
+src/        server: Express API, Docker, authentication, catalog, installs
+web/        interface: React + Vite
+catalog/    app catalog (JSON) and icons
+prisma/     database schema and migrations (SQLite)
+e2e/        browser tests
+docs/       design documents and plans
+```
+
+Every push and pull request runs typecheck, lint, tests and the build on
+Node 20 and 22, plus the browser tests, on GitHub Actions.
+
+## Contributing
+
+Issues and pull requests are welcome. Before opening a pull request, please run
+`npm run typecheck`, `npm run lint` and `npm test`.
+
+## License
+
+EasyHost is released under the [MIT License](LICENSE).
+
+The apps in the catalog are separate projects with their own licenses. EasyHost
+only downloads their official images; it does not include or modify them.
